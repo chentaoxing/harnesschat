@@ -29,7 +29,7 @@ Most agent orchestrators in 2026 are worktree/diff/PR centric — they treat age
 
 | Member | Headless invocation | Notes |
 |---|---|---|
-| ZCode | `zcode -p` | runs on the app's bundled Node (>= 22.5); falls back to system Node |
+| ZCode | `zcode -p` | runs on the app's bundled Node; HarnessChat injects the provider-config paths the ZCode desktop app writes under `~/.zcode/v2` (its own lookup only resolves when launched from the packaged app dir) |
 | Claude Code | `claude -p` | |
 | Codex | `codex exec` | model comes from its own configured provider (local relays must be running) |
 | Gemini CLI | `gemini -p` | |

@@ -23,6 +23,51 @@ function nodeRunner() {
   return n ? { file: n, env: {} } : null;
 }
 
+/**
+ * ZCode 的无头 CLI 只在「从打包后的应用目录里启动」时能自己找到内置 provider 配置：
+ * 它按 dirname(entrypoint)/provider/zcode-builtin.json 与再上溯 5 级的 config/provider/zcode-builtin.json
+ * 两个候选去找，而我们直接跑 resources/glm/zcode.cjs 时两个候选都不存在（真文件在 resources/config/provider/），
+ * 于是报「无法定位 CLI ZCode Built-in Provider Config」——跟登录态、订阅、我们的 Node 选择都无关。
+ *
+ * 它同时留了显式入口：ZCODE_BUILTIN_PROVIDER_CONFIG_FILE 与 ZCODE_PERSONAL_PROVIDER_CONFIG_FILE
+ * 必须同时给（只给一个会抛「路径必须同时提供」），给了就跳过那段查找。两个路径都是 ZCode 桌面端登录后
+ * 自己落盘的，版本号目录与 endpoint-<hash> 目录会变，所以按 mtime 取最新的一份，并缓存 5 分钟。
+ */
+let zcodeEnvCache = { at: 0, value: null };
+function zcodeProviderEnv() {
+  const now = Date.now();
+  if (now - zcodeEnvCache.at < 5 * 60 * 1000) return zcodeEnvCache.value;
+  let out = null;
+  try {
+    const home = os.homedir();
+    const personal = path.join(home, '.zcode', 'v2', 'provider_config.json');
+    if (fs.existsSync(personal)) {
+      const plat = process.platform === 'win32' ? 'windows' : process.platform;
+      const arch = process.arch === 'arm64' ? 'aarch64' : process.arch === 'x64' ? 'x86_64' : process.arch;
+      const root = path.join(home, '.zcode', 'v2', 'runtime', 'provider', `${plat}-${arch}`);
+      let best = null;
+      for (const ver of safeReadDirs(root)) {
+        for (const ep of safeReadDirs(path.join(root, ver))) {
+          const f = path.join(root, ver, ep, 'zcode-builtin.json');
+          try {
+            const st = fs.statSync(f);
+            if (!best || st.mtimeMs > best.mtime) best = { file: f, mtime: st.mtimeMs };
+          } catch (e) { /* 该目录下没有这份文件，跳过 */ }
+        }
+      }
+      if (best) {
+        out = { ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: best.file, ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: personal };
+      }
+    }
+  } catch (e) { out = null; }
+  zcodeEnvCache = { at: now, value: out };
+  return out;
+}
+
+function safeReadDirs(dir) {
+  try { return fs.readdirSync(dir, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name); } catch (e) { return []; }
+}
+
 // ---------- 命令探测 ----------
 function whichAll(cmd) {
   try {
@@ -133,11 +178,16 @@ const MEMBERS = [
       { id: 'auto', args: ['--mode', 'yolo'] },
       { id: 'edit', args: ['--mode', 'edit'] }
     ],
-    noteZh: 'zcode -p 无头模式；用应用内置 Node 跑，无需系统 Node（能否回复取决于 ZCode 自身的登录态与 provider 配置）',
-    noteEn: 'zcode headless; runs on the bundled Node, no system Node needed (actual replies depend on ZCode\'s own login state and provider config)',
+    noteZh: 'zcode -p 无头模式；用应用内置 Node 跑，并显式注入 ZCode 桌面端落盘的 provider 配置路径（没注入=没找到 ~/.zcode/v2，请先用桌面端登录一次）',
+    noteEn: 'zcode headless on the bundled Node; the provider config paths written by the ZCode desktop app are injected explicitly (missing means no ~/.zcode/v2 — log in once with the desktop app)',
     buildSpawn(task, shim, modeArgs) {
       if (!shim) return { error: 'NOT_FOUND' };
-      return { file: shim.file, args: [...shim.prefix, '-p', task.prompt, ...modeArgs, '--no-color', '--cwd', task.cwd], env: shim.env };
+      const prov = zcodeProviderEnv();
+      return {
+        file: shim.file,
+        args: [...shim.prefix, '-p', task.prompt, ...modeArgs, '--no-color', '--cwd', task.cwd],
+        env: { ...shim.env, ...(prov || {}) }
+      };
     }
   },
   {

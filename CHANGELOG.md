@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2 (2026-10-08)
+
+- **修好 ZCode 成员**：无头 `zcode -p` 之前必报「无法定位 CLI ZCode Built-in Provider Config」。根因是 ZCode CLI 只按「从打包后的应用目录启动」这一种布局找它的 provider 配置（`dirname(entrypoint)/provider/…` 与上溯 5 级的 `config/provider/…`），我们直接跑 `resources/glm/zcode.cjs` 时两个候选都不存在；与登录态、订阅、以及我们选哪个 Node 运行时无关。现在按它自己留的显式入口注入 `ZCODE_BUILTIN_PROVIDER_CONFIG_FILE` + `ZCODE_PERSONAL_PROVIDER_CONFIG_FILE`（两者必须同时给，只给一个它会抛「路径必须同时提供」），路径从 `~/.zcode/v2` 里按 mtime 取最新、缓存 5 分钟。
+- 注入不了（没有 `~/.zcode/v2`，即从没登录过 ZCode 桌面端）时，成员说明会直接讲清楚原因。
+
 ## 0.3.1 (2026-10-08)
 
 - 启动时把上次遗留的 `running` 任务标为 `interrupted`（「已中断（应用重启）」）：应用被杀/崩溃/升级重启后，界面不再永远挂着「干活中…」的假卡片，而「停止」对这种僵尸卡片本来也无效。
