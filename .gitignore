@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.log
+.mimosa/
+nul
+run.log
+dist-build.log
+npm-install.log
+codex-probe*.log
+assets/qwen-icon-*.png
+.DS_Store

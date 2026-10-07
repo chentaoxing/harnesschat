@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>HarnessChat</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <!-- 侧栏 -->
+  <aside id="sidebar">
+    <div class="group-head">
+      <div class="group-title">HarnessChat 群聊</div>
+      <div class="group-sub" id="workspace-label" title="">…</div>
+    </div>
+    <div class="member-list" id="member-list"></div>
+    <div class="sidebar-foot">
+      <button id="btn-settings" class="ghost-btn">⚙ 设置 Settings</button>
+    </div>
+  </aside>
+
+  <!-- 主区 -->
+  <main id="main">
+    <header id="chat-head">
+      <span id="chat-title">群聊（<span id="member-count">0</span>）</span>
+      <span id="conn-status" class="conn off">连接中…</span>
+    </header>
+    <div id="messages"></div>
+    <div id="composer">
+      <div id="mention-pop" class="hidden"></div>
+      <input id="model-input" type="text" list="model-list" placeholder="模型（留空=成员默认）">
+      <datalist id="model-list"></datalist>
+      <textarea id="input" rows="2" placeholder="输入消息，@成员 派任务（如：@Codex 把 README 翻成英文）"></textarea>
+      <button id="btn-send">发送</button>
+    </div>
+  </main>
+</div>
+
+<!-- 首次运行安全提示 -->
+<div id="firstrun-mask" class="hidden">
+  <div id="firstrun">
+    <h3>⚠️ 使用前必读 / Please read first</h3>
+    <p class="zh">HarnessChat 会在<strong>群工作区目录</strong>里以命令行方式运行各 AI harness（如 Codex、Claude Code、Qoder CLI）。根据你给每个成员选择的权限模式，它们可能<strong>无需确认即读写文件、执行命令</strong>。请只把信任的 harness 拉进群，并把工作区设为专用目录。</p>
+    <p class="en">HarnessChat runs AI harnesses (Codex, Claude Code, Qoder CLI…) as command-line processes inside the <strong>group workspace directory</strong>. Depending on the permission mode you pick per member, they may <strong>read/write files and run commands without confirmation</strong>. Only add harnesses you trust, and point the workspace at a dedicated directory.</p>
+    <div class="set-actions">
+      <button id="btn-firstrun-ok" class="primary-btn">我已了解 / I understand</button>
+    </div>
+  </div>
+</div>
+
+<!-- 设置弹窗 -->
+<div id="settings-mask" class="hidden">
+  <div id="settings">
+    <h3>群设置 Settings</h3>
+    <div class="set-row">
+      <label>群工作区（headless 成员的运行目录，即安全边界）/ Group workspace (working dir & security boundary)</label>
+      <input id="set-workspace" type="text">
+    </div>
+    <div class="set-members" id="set-members"></div>
+    <div class="custom-block">
+      <h4>自定义成员 / Custom members</h4>
+      <p class="hint">命令模板：program + 参数列表（每行一个参数）。占位符：<code>{{prompt}}</code> 任务内容、<code>{{model}}</code> 模型（留空时该参数自动移除）、<code>{{cwd}}</code> 群工作区。参数列表里没有 {{prompt}} 时任务会追加到末尾。<br>Template: one argument per line; placeholders <code>{{prompt}}</code>, <code>{{model}}</code> (dropped when empty), <code>{{cwd}}</code>; prompt is appended if not present.</p>
+      <div id="custom-list"></div>
+      <button id="btn-custom-add" class="ghost-btn">＋ 添加自定义成员 / Add custom member</button>
+    </div>
+    <div class="set-actions">
+      <button id="btn-settings-cancel" class="ghost-btn">取消 Cancel</button>
+      <button id="btn-settings-save" class="primary-btn">保存 Save</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
