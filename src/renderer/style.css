@@ -90,6 +90,8 @@ body { font-family: "Microsoft YaHei", "Segoe UI", sans-serif; font-size: 14px; 
 .task-status.running { color: #e6a23c; }
 .task-status.done { color: #45c26a; }
 .task-status.error, .task-status.timeout { color: #d9534f; }
+.task-status.interrupted { color: #8a8f98; }
+.task-foot button:disabled { opacity: .6; cursor: default; }
 .task-model { color: #b0b0b0; margin-left: auto; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-prompt { padding: 8px 12px; color: #666; font-size: 12.5px; background: #fafafa;
   border-bottom: 1px solid #f0f0f0; white-space: pre-wrap; word-break: break-word; max-height: 88px; overflow-y: auto; }

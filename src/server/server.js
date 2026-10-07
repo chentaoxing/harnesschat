@@ -65,7 +65,25 @@ class GroupServer {
   }
 
   listen() {
+    this.reconcileInterruptedTasks();
     return new Promise(resolve => this.server.listen(this.port, '127.0.0.1', resolve));
+  }
+
+  /**
+   * 应用被杀/崩溃/升级重启后，上次还在跑的任务不会再有人写终态：
+   * 启动时统一标成 interrupted，否则界面上永远挂着「干活中…」的假卡片，
+   * 而「停止」按钮只能杀活着的子进程，对这种僵尸卡片无能为力。
+   */
+  reconcileInterruptedTasks() {
+    let n = 0;
+    for (const m of this.messages) {
+      if (m.type === 'task' && m.status === 'running') {
+        m.status = 'interrupted';
+        this.store.appendMessage({ type: 'task_status', taskId: m.id, status: 'interrupted', code: null, at: Date.now() });
+        n++;
+      }
+    }
+    if (n) console.log(`[harnesschat] ${n} 个任务因应用重启被中断，已标记为 interrupted`);
   }
 
   authed(req) {

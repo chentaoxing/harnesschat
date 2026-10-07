@@ -56,7 +56,7 @@ function isWorking(memberId) {
 }
 
 function statusText(s) {
-  return { running: '干活中…', done: '已完成', error: '出错', timeout: '超时中止' }[s] || s;
+  return { running: '干活中…', done: '已完成', error: '出错', timeout: '超时中止', interrupted: '已中断（应用重启）' }[s] || s;
 }
 
 function taskCardHTML(t) {
@@ -67,7 +67,11 @@ function taskCardHTML(t) {
          <button data-act="copy">复制结果</button>
        </div>`
     : (t.status === 'running'
-        ? `<div class="task-foot" data-task="${t.id}"><button data-act="stop">停止</button></div>` : '');
+        ? `<div class="task-foot" data-task="${t.id}"><button data-act="stop">停止</button></div>`
+        : `<div class="task-foot" data-task="${t.id}">
+             <button data-act="retry">重试</button>
+             <button data-act="copy">复制输出</button>
+           </div>`);
   return `
     <div class="task-head">
       <span class="task-who" style="color:${t.color || 'var(--accent)'}">${esc(t.memberName || t.memberId)}</span>
@@ -402,9 +406,23 @@ document.addEventListener('click', async (e) => {
       body: JSON.stringify({ taskId })
     });
   } else if (act === 'copy') {
+    const label = btn.textContent;
     navigator.clipboard.writeText(task.text || '').then(() => {
       btn.textContent = '已复制';
-      setTimeout(() => { btn.textContent = '复制结果'; }, 1200);
+      setTimeout(() => { btn.textContent = label; }, 1200);
+    });
+  } else if (act === 'retry') {
+    btn.disabled = true;
+    btn.textContent = '已重新派单';
+    await fetch(BASE + '/api/send', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({
+        text: '@' + (task.memberName || task.memberId) + ' ' + task.prompt,
+        prompt: task.prompt,
+        memberId: task.memberId,
+        threadId: task.threadId,
+        model: task.model || null
+      })
     });
   } else if (act === 'continue') {
     state.continueThread = { threadId: task.threadId, memberId: task.memberId, memberName: task.memberName };
