@@ -301,4 +301,67 @@ function buildCustomSpawn(cm, task, resolveCmd) {
   return { file: shim.file, args: [...shim.prefix, ...args], env: shim.env };
 }
 
-module.exports = { MEMBERS, buildCustomSpawn, resolveCommand, resolveMemberProgram, findNode };
+// ---------- 模型列表发现 ----------
+// 原则：只读各 harness 自己配置里的"模型名"，绝不读取/输出任何密钥；
+// 读不到就返回空数组，UI 回退为自由输入。
+function listZcodeModels() {
+  // ~/.zcode/v2/provider_config.json：providerRules[].config.modelOrder/personalModelIds
+  // 订阅渠道（zai-start-plan）和自建网关渠道（如 NewAPI）的模型都在这里
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.zcode', 'v2', 'provider_config.json'), 'utf8'));
+    const rules = (j.config && j.config.providerConfigRules && j.config.providerConfigRules.providerRules) || [];
+    const models = [];
+    for (const r of rules) {
+      if (r.enabled === false) continue;
+      const cfg = r.config || {};
+      for (const m of (cfg.modelOrder || cfg.personalModelIds || [])) {
+        if (m && !models.includes(m)) models.push(m);
+      }
+    }
+    return models;
+  } catch (e) { return []; }
+}
+
+function listCodexModels() {
+  // ~/.codex/config.toml 顶层 model = "..."（留空时 codex 即用此默认）
+  try {
+    const cfg = fs.readFileSync(path.join(os.homedir(), '.codex', 'config.toml'), 'utf8');
+    const m = cfg.match(/^model\s*=\s*"([^"]+)"/m);
+    return m ? [m[1]] : [];
+  } catch (e) { return []; }
+}
+
+function listMinimaxModels() {
+  // ~/.minimax/config.yaml whitelist 列表
+  try {
+    const cfg = fs.readFileSync(path.join(os.homedir(), '.minimax', 'config.yaml'), 'utf8');
+    const lines = cfg.split(/\r?\n/);
+    const idx = lines.findIndex(l => /^\s*whitelist:\s*$/.test(l));
+    if (idx < 0) return [];
+    const models = [];
+    for (let i = idx + 1; i < lines.length; i++) {
+      const m = lines[i].match(/^\s+-\s*(\S+)/);
+      if (!m) break;
+      models.push(m[1].replace(/['"]/g, ''));
+    }
+    return models;
+  } catch (e) { return []; }
+}
+
+const STATIC_MODELS = {
+  claude: ['sonnet', 'opus', 'haiku'],
+  gemini: ['gemini-2.5-pro', 'gemini-2.5-flash'],
+  cline: ['cline-free/deepseek-v4.1-flash', 'cline-free/gemini-3.8-flash', 'cline-free/mimo-v2.6-flash', 'cline-free/kimi-k3']
+};
+
+function listModels(member) {
+  if (!member || member.custom) return { source: 'manual', models: [] };
+  switch (member.id) {
+    case 'zcode': return { source: "config: ~/.zcode/v2/provider_config.json", models: listZcodeModels() };
+    case 'codex': return { source: 'config: ~/.codex/config.toml', models: listCodexModels() };
+    case 'minimax': return { source: 'config: ~/.minimax/config.yaml', models: listMinimaxModels() };
+    default: return { source: 'static', models: STATIC_MODELS[member.id] || [] };
+  }
+}
+
+module.exports = { MEMBERS, buildCustomSpawn, resolveCommand, resolveMemberProgram, findNode, listModels };

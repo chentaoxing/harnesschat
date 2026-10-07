@@ -11,7 +11,8 @@ const state = {
   workspace: '',
   continueThread: null, // { threadId, memberId } 续话模式
   mentionOpen: false,
-  mentionedMember: null
+  mentionedMember: null,
+  modelCache: {} // memberId -> {source, models}
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -224,18 +225,36 @@ function showMention() {
 }
 function hideMention() { $('#mention-pop').classList.add('hidden'); state.mentionOpen = false; }
 
+async function fetchMemberModels(memberId) {
+  if (state.modelCache[memberId]) return state.modelCache[memberId];
+  try {
+    const r = await fetch(BASE + '/api/models?member=' + encodeURIComponent(memberId), { headers: authHeaders() });
+    const j = await r.json();
+    state.modelCache[memberId] = j;
+    return j;
+  } catch (e) { return { source: '', models: [] }; }
+}
+
 // 根据输入里的 @ 提及联动模型提示（datalist 填充）
-function checkMention() {
+async function checkMention() {
   const text = $('#input').value;
   const m = state.members.find(mm => new RegExp(`@${mm.name}`, 'i').test(text) || new RegExp(`@${mm.id}`, 'i').test(text));
   state.mentionedMember = m || null;
   const dl = $('#model-list');
   dl.innerHTML = '';
   if (m && m.modelSupport) {
-    for (const c of (m.modelHint || '').split('/').map(s => s.trim()).filter(s => s && !s.endsWith('…'))) {
+    const { models } = await fetchMemberModels(m.id);
+    for (const c of models) {
       const opt = document.createElement('option');
       opt.value = c;
       dl.appendChild(opt);
+    }
+    if (!models.length && m.modelHint) {
+      for (const c of m.modelHint.split('/').map(s => s.trim()).filter(s => s && !s.endsWith('…'))) {
+        const opt = document.createElement('option');
+        opt.value = c;
+        dl.appendChild(opt);
+      }
     }
   }
   $('#model-input').placeholder = m && m.modelSupport ? `模型（默认：${m.defaultModel || '成员默认'}）` : '模型（该成员不支持指定）';
@@ -276,8 +295,33 @@ function openSettings() {
         <label>可执行路径</label>
         <input type="text" data-role="programPath" value="${esc((state.programPaths || {})[m.id] || '')}" placeholder="C:\\path\\to\\cli.cmd 或 /usr/local/bin/cli">
       </div>` : ''}
+      ${m.modelSupport ? `<div class="model-chips" data-role="chips" data-member="${m.id}"><span class="sm-hint">读取模型列表…</span></div>` : ''}
     `;
     box.appendChild(div);
+    if (m.modelSupport) {
+      // 异步填模型列表（点击即设为默认模型）
+      fetchMemberModels(m.id).then(({ source, models }) => {
+        const chips = div.querySelector('[data-role="chips"]');
+        if (!chips) return;
+        chips.innerHTML = '';
+        const modelInput = div.querySelector('[data-role="model"]');
+        if (!models.length) {
+          chips.innerHTML = `<span class="sm-hint">${source === 'manual' ? '自定义成员请直接输入模型名' : '未在本地配置中发现模型列表，可直接输入'}</span>`;
+          return;
+        }
+        chips.innerHTML = `<span class="sm-hint">从 ${esc(source)} 读取到 ${models.length} 个模型，点击设为默认：</span>`;
+        const row = document.createElement('div');
+        row.className = 'chip-row';
+        for (const mo of models) {
+          const b = document.createElement('button');
+          b.className = 'chip';
+          b.textContent = mo;
+          b.addEventListener('click', () => { if (modelInput) modelInput.value = mo; });
+          row.appendChild(b);
+        }
+        chips.appendChild(row);
+      });
+    }
   }
   // 自定义成员
   const cl = $('#custom-list');

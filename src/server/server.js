@@ -11,7 +11,7 @@ const os = require('os');
 const { WebSocketServer } = require('ws');
 
 const { safeExec } = require('./safe-spawn');
-const { MEMBERS, buildCustomSpawn, resolveCommand, resolveMemberProgram } = require('./adapters');
+const { MEMBERS, buildCustomSpawn, resolveCommand, resolveMemberProgram, listModels } = require('./adapters');
 const { Store } = require('./store');
 
 const ANSI_RE = /[\u001b\u009b][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[-a-zA-Z\d/#&.:=?%@~_]*)*)?\u0007)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-ntqry=><~]))/g;
@@ -99,6 +99,11 @@ class GroupServer {
     const url = new URL(req.url, 'http://127.0.0.1');
     if (url.pathname.startsWith('/api/') && !this.authed(req)) {
       return json(401, { error: 'unauthorized' });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/models') {
+      const member = this.memberById(url.searchParams.get('member') || '');
+      const r = listModels(member);
+      return json(200, r);
     }
     if (req.method === 'GET' && url.pathname === '/api/state') {
       return json(200, {
