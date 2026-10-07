@@ -22,19 +22,21 @@ Most agent orchestrators in 2026 are worktree/diff/PR centric — they treat age
 - **Workspace as security boundary** — headless members run inside the group workspace directory.
 - **Local-only + token auth** — the embedded server binds to 127.0.0.1 with a random per-install token; nothing phones home.
 - **Tray-resident** — closing the window keeps the group working; quit from the tray menu.
+- **Bundled Node runtime** — members whose CLI ships as a `.js`/`.cjs` entry (ZCode, Cline via npx) run on the Node embedded in Electron, so a system Node is no longer required.
+- **Self-updating** — checks this repo's GitHub Releases on startup and every 30 minutes, then downloads and launches the installer from inside the app.
 
 ## Built-in members
 
 | Member | Headless invocation | Notes |
 |---|---|---|
-| ZCode | `zcode -p` | needs system Node ≥ 22.5 (`node:sqlite`) |
+| ZCode | `zcode -p` | runs on the app's bundled Node (>= 22.5); falls back to system Node |
 | Claude Code | `claude -p` | |
 | Codex | `codex exec` | model comes from its own configured provider (local relays must be running) |
 | Gemini CLI | `gemini -p` | |
 | Qoder CLI | `qoderclicn -p` | |
 | Cline | `cline` via npx | `cline-free/*` models are free |
 | Hermes | `hermes -z` | |
-| MiniMax Code | `minimax -p` | experimental; headless path may not work on current versions |
+| MiniMax Code | `minimax -p` | experimental; the mavis LLM endpoint needs an internal auth-broker lease — see SECURITY of their design |
 
 Detection order: PATH → well-known install locations → manual path override in Settings. Members that aren't found are greyed out, and you can always add your own via the command template.
 
@@ -46,7 +48,26 @@ npm start          # dev
 npm run dist       # build Windows installer (NSIS)
 ```
 
-Requires Node.js ≥ 20 for building. The app itself embeds its own Node via Electron; some members (ZCode) need a system Node ≥ 22.5.
+Requires Node.js ≥ 20 to build. The shipped app carries its own Node (embedded in Electron, currently 24.x), so end users need no Node installation at all.
+
+## Updates
+
+Settings → *Version & updates* shows the running version and a **Check for updates** button; a newer release also raises a banner in the chat header. Downloading writes the installer to `%TEMP%` and launches it, so upgrading is two clicks.
+
+How it decides what is newest:
+
+1. `GET https://api.github.com/repos/chentaoxing/harnesschat/releases/latest` — the repo is public, so no credential is needed.
+2. If that call is refused (the anonymous quota is counted per source IP and shared proxies burn it fast), it falls back to `https://github.com/chentaoxing/harnesschat/releases.atom` and resolves the asset link from the release page. Neither route needs a token.
+3. Optionally put a token in `%APPDATA%\HarnessChat\github-token.txt` (or set `GH_TOKEN`) to lift the quota. HarnessChat only reads its own data directory and environment variables — it never goes looking for other tools' credentials.
+
+All requests go through Electron's network stack, so a system proxy is honoured automatically; every request has a hard timeout, and a stale download lock is taken over after 5 minutes.
+
+## When one of the harnesses updates
+
+Nothing to do on your side: member commands are re-resolved on every launch (PATH → known install locations → your override in Settings), and per-member model lists are read from each harness's own config at run time. The two exceptions worth knowing:
+
+- The **Cline** member runs through `npx`, so it follows whatever version npx resolves; pin it by editing `cline` in `src/server/adapters.js` (e.g. `cline@3.0.69`) if you want a fixed build.
+- **MiniMax Code** is experimental and stays off by default: its `mavis` LLM endpoint requires a lease token issued over the desktop app's internal auth broker, which external callers cannot obtain. Refreshing the OAuth token by opening MiniMax Code is not enough.
 
 ## Security
 
@@ -75,5 +96,9 @@ MIT — see [LICENSE](LICENSE).
 - **自定义成员**：任意 CLI agent 填 `program` + 参数模板（`{{prompt}}`/`{{model}}`/`{{cwd}}`）即可入群，无需写代码
 - **权限模式逐成员可配**，群工作区即安全边界；本地 127.0.0.1 + 随机 token，不上传任何数据
 - **托盘常驻**：关窗群继续干活
+- **自带 Node 运行时**：ZCode、Cline(npx) 这类 `.js/.cjs` 入口的成员用 Electron 内嵌的 Node 跑，用户机器不装 Node 也能用
+- **自动更新**：启动时与每 30 分钟查一次本仓 GitHub Releases，设置里「检查更新」或顶部横幅一键下载安装包
 
 安装：`npm install && npm start`（开发）或 `npm run dist`（打 Windows 安装包）。安全须知见 [SECURITY.md](SECURITY.md)。协议 MIT。
+
+更新与配额：公开仓匿名即可查版本；走共享代理时匿名配额容易耗尽，此时自动回退 `releases.atom`（同样不需要 token）。想彻底摆脱配额，把 token 放进 `%APPDATA%\HarnessChat\github-token.txt` 或设 `GH_TOKEN`——本程序只读自己的数据目录和环境变量，不会去翻别的工具的凭据。

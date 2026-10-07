@@ -227,3 +227,13 @@ body { font-family: "Microsoft YaHei", "Segoe UI", sans-serif; font-size: 14px; 
   border: 1px solid #d8defc; background: #f4f6ff; color: var(--accent);
 }
 .chip:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* 更新横幅与关于行 */
+#update-banner {
+  margin-left: auto; font-size: 12px; color: #e6a23c;
+  display: flex; align-items: center; gap: 8px;
+}
+#update-banner b { color: #e6a23c; }
+.about-line { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+#app-version { color: var(--text); font-size: 13px; }
+#btn-check-update:disabled { opacity: .55; cursor: default; }

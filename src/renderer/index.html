@@ -24,6 +24,10 @@
     <header id="chat-head">
       <span id="chat-title">群聊（<span id="member-count">0</span>）</span>
       <span id="conn-status" class="conn off">连接中…</span>
+      <span id="update-banner" class="hidden">
+        发现新版本 <b id="update-version"></b>
+        <button id="btn-update" class="chip">下载并安装</button>
+      </span>
     </header>
     <div id="messages"></div>
     <div id="composer">
@@ -52,6 +56,14 @@
 <div id="settings-mask" class="hidden">
   <div id="settings">
     <h3>群设置 Settings</h3>
+    <div class="set-row" id="about-row">
+      <label>版本与更新 Version &amp; updates</label>
+      <div class="about-line">
+        <b id="app-version">…</b>
+        <button id="btn-check-update" class="chip" data-act="check">检查更新</button>
+        <span id="update-status" class="sm-hint"></span>
+      </div>
+    </div>
     <div class="set-row">
       <label>群工作区（headless 成员的运行目录，即安全边界）/ Group workspace (working dir & security boundary)</label>
       <input id="set-workspace" type="text">

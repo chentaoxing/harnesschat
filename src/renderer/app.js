@@ -456,4 +456,104 @@ $('#btn-firstrun-ok').addEventListener('click', async () => {
   });
 });
 
-loadState().then(connectWS);
+// ---------- 更新器 ----------
+const HAS_BRIDGE = typeof window.harnesschat !== 'undefined';
+let updateBusy = false;
+
+function setUpdateStatus(text) {
+  const el = $('#update-status');
+  if (el) el.textContent = text;
+}
+
+function setSettingsBtn(label, act, enabled) {
+  const btn = $('#btn-check-update');
+  if (!btn) return;
+  btn.textContent = label;
+  btn.dataset.act = act;
+  btn.disabled = !enabled;
+}
+
+async function showAppVersion() {
+  const el = $('#app-version');
+  if (!el) return;
+  if (!HAS_BRIDGE) { el.textContent = '（浏览器模式）'; return; }
+  try { el.textContent = 'v' + (await window.harnesschat.version()); } catch (e) { el.textContent = ''; }
+}
+
+async function downloadAndRunUpdate(btn) {
+  if (updateBusy) return;
+  updateBusy = true;
+  const label = btn ? btn.textContent : '';
+  if (btn) btn.disabled = true;
+  setUpdateStatus('下载中…');
+  try {
+    const r = await window.harnesschat.downloadAndRun();
+    if (r.ok) {
+      setUpdateStatus(`v${r.version || ''} 安装包已下载并启动，按提示完成安装`);
+      setSettingsBtn('已启动安装器', 'done', false);
+      if (btn) btn.textContent = '安装器已启动';
+    } else {
+      setUpdateStatus(r.error || '下载失败');
+      setSettingsBtn(label || '下载并安装', 'download', true);
+      if (btn) { btn.disabled = false; btn.textContent = '重试下载'; }
+    }
+  } catch (e) {
+    setUpdateStatus('失败: ' + String((e && e.message) || e));
+    setSettingsBtn('下载并安装', 'download', true);
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+  } finally {
+    updateBusy = false;
+  }
+}
+
+// 下载进度由主进程单向推送（避免渲染层轮询）
+if (HAS_BRIDGE && window.harnesschat.onUpdateProgress) {
+  window.harnesschat.onUpdateProgress((text) => setUpdateStatus('下载中 ' + text));
+}
+
+async function checkUpdateInteractive() {
+  if (!HAS_BRIDGE) { setUpdateStatus('（浏览器模式无更新器，请用 npm start 或安装包运行）'); return; }
+  if (updateBusy) return;
+  setUpdateStatus('检查中…');
+  const r = await window.harnesschat.checkUpdate();
+  const src = r.source === 'atom' ? '，走 releases.atom' : '';
+  if (!r.ok) {
+    setUpdateStatus(r.noReleaseYet ? 'GitHub 上还没有发布版本' : ('检查失败: ' + r.error));
+    setSettingsBtn('检查更新', 'check', true);
+    return;
+  }
+  if (!r.updateAvailable) { setUpdateStatus(`已是最新（v${r.current}${src}）`); setSettingsBtn('检查更新', 'check', true); return; }
+  setUpdateStatus(`发现新版本 v${r.latest}${src}，点右侧按钮下载`);
+  setSettingsBtn('下载并安装', 'download', true);
+  showUpdateBanner(r.latest);
+}
+
+function showUpdateBanner(version) {
+  const banner = $('#update-banner');
+  if (!banner) return;
+  $('#update-version').textContent = 'v' + version;
+  banner.classList.remove('hidden');
+}
+
+async function autoCheckUpdate() {
+  if (!HAS_BRIDGE) return;
+  try {
+    const r = await window.harnesschat.checkUpdate();
+    if (r.ok && r.updateAvailable) showUpdateBanner(r.latest);
+  } catch (e) { /* 静默：更新检查绝不打扰主流程 */ }
+}
+
+$('#btn-check-update').addEventListener('click', (e) => {
+  const btn = e.currentTarget;
+  if (btn.dataset.act === 'download') downloadAndRunUpdate(btn);
+  else checkUpdateInteractive();
+});
+$('#btn-update').addEventListener('click', (e) => downloadAndRunUpdate(e.currentTarget));
+$('#btn-update').title = '下载最新版本安装包并启动安装';
+
+loadState().then(() => {
+  connectWS();
+  showAppVersion();
+  autoCheckUpdate();
+  setInterval(autoCheckUpdate, 30 * 60 * 1000); // 开久了也能主动发现新版本
+});

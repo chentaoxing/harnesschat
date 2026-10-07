@@ -13,6 +13,16 @@ const RUN_DISCOVERY = cp.execFileSync; // 仅用于 which/where 探测，本身�
 
 const IS_WIN = process.platform === 'win32';
 
+// 应用自带的 Electron 可以以 node 模式（ELECTRON_RUN_AS_NODE）运行 JS 入口；
+// 内嵌 Node ≥ 22.5（含 node:sqlite）时 zcode 不再依赖系统 Node。
+const [NODE_MAJ, NODE_MIN] = process.versions.node.split('.').map(Number);
+const EMBEDDED_NODE_OK = NODE_MAJ > 22 || (NODE_MAJ === 22 && NODE_MIN >= 5);
+function nodeRunner() {
+  if (EMBEDDED_NODE_OK) return { file: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } };
+  const n = findNode();
+  return n ? { file: n, env: {} } : null;
+}
+
 // ---------- 命令探测 ----------
 function whichAll(cmd) {
   try {
@@ -60,13 +70,13 @@ function resolveCommand(nameOrPath) {
       try { fs.accessSync(hit, fs.constants.X_OK); resolved = { file: hit, prefix: [], env: {} }; break; } catch (e) {}
     }
   }
-  // Windows：解析出/直接给出的 .js/.cjs 入口用 node 跑
+  // Windows：解析出/直接给出的 .js/.cjs 入口用 node 跑（优先应用内置 Node，回退系统 Node）
   if (!resolved && isPath && /\.(c?js)$/i.test(nameOrPath)) {
     try { fs.accessSync(nameOrPath); resolved = { file: nameOrPath, prefix: [], env: {} }; } catch (e) {}
   }
   if (resolved && /\.c?js$/i.test(resolved.file)) {
-    const node = findNode();
-    if (node) resolved = { file: node, prefix: [resolved.file, ...resolved.prefix], env: resolved.env };
+    const runner = nodeRunner();
+    if (runner) resolved = { file: runner.file, prefix: [resolved.file, ...resolved.prefix], env: { ...resolved.env, ...runner.env } };
   }
   shimCache.set(key, resolved);
   return resolved;
@@ -123,8 +133,8 @@ const MEMBERS = [
       { id: 'auto', args: ['--mode', 'yolo'] },
       { id: 'edit', args: ['--mode', 'edit'] }
     ],
-    noteZh: 'zcode -p 无头模式；需要系统 Node ≥ 22.5（node:sqlite）',
-    noteEn: 'zcode headless; requires system Node >= 22.5 (node:sqlite)',
+    noteZh: 'zcode -p 无头模式；用应用内置 Node 跑，无需系统 Node（能否回复取决于 ZCode 自身的登录态与 provider 配置）',
+    noteEn: 'zcode headless; runs on the bundled Node, no system Node needed (actual replies depend on ZCode\'s own login state and provider config)',
     buildSpawn(task, shim, modeArgs) {
       if (!shim) return { error: 'NOT_FOUND' };
       return { file: shim.file, args: [...shim.prefix, '-p', task.prompt, ...modeArgs, '--no-color', '--cwd', task.cwd], env: shim.env };

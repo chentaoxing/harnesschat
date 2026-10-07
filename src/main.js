@@ -1,13 +1,22 @@
-// Electron 主进程：内嵌 HarnessChat 服务器 + 窗口 + 托盘常驻
-const { app, BrowserWindow, Tray, Menu, nativeImage } = require('electron');
+// Electron 主进程：内嵌 HarnessChat 服务器 + 窗口 + 托盘常驻 + 自研更新器
+const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { GroupServer } = require('./server/server');
+const updater = require('./updater');
 
 let win = null;
 let tray = null;
 const PORT = 18790;
+
+ipcMain.handle('app:version', () => app.getVersion());
+
+// 更新器 IPC：进度用主进程→渲染进程单向推送，避免渲染层轮询
+ipcMain.handle('updater:check', () => updater.check());
+ipcMain.handle('updater:download', () => updater.downloadAndRun((text) => {
+  if (win && !win.isDestroyed()) win.webContents.send('updater:progress', text);
+}));
 
 function loadOrCreateToken(dataDir) {
   const tokenPath = path.join(dataDir, 'token.txt');
@@ -49,7 +58,8 @@ if (!gotLock) {
       backgroundColor: '#f2f2f2',
       webPreferences: {
         contextIsolation: true,
-        nodeIntegration: false
+        nodeIntegration: false,
+        preload: path.join(__dirname, 'preload.js')
       }
     });
     win.loadURL(`http://127.0.0.1:${PORT}/?token=${token}`);
