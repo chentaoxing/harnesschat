@@ -20,6 +20,42 @@ const stripAnsi = (s) => s.replace(ANSI_RE, '');
 
 function id() { return crypto.randomBytes(6).toString('hex'); }
 
+/**
+ * 子进程环境变量白名单。
+ * 只放两类：(1) 让 Windows 和一个 CLI 进程能正常起跑的系统变量；(2) 让 CLI 找到
+ * 自己配置/登录态的家目录与数据目录变量，以及本机必需的代理变量。
+ * 任何密钥形状的变量都不在这里 —— 每个成员用自己的登录，看不到别人的 key。
+ * 需要额外放行时在设置里配 envExtra（只写变量名），不写值。
+ */
+const ENV_KEEP = [
+  'PATH', 'PATHEXT', 'COMSPEC', 'SYSTEMROOT', 'SYSTEMDRIVE', 'WINDIR',
+  'TEMP', 'TMP', 'HOME', 'HOMEDRIVE', 'HOMEPATH', 'USERPROFILE', 'USERNAME', 'USERDOMAIN',
+  'APPDATA', 'LOCALAPPDATA', 'PROGRAMDATA', 'PROGRAMFILES', 'PROGRAMFILES(X86)',
+  'COMMONPROGRAMFILES', 'COMMONPROGRAMFILES(X86)',
+  'LANG', 'LC_ALL', 'TERM', 'COLORTERM', 'PYTHONIOENCODING', 'TZ', 'NODE_ENV',
+  'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
+  'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy'
+];
+// 第二道网：万一将来有人往白名单里加了 key 形状的名字，这里也拦掉
+const SECRET_SHAPED = /(^|_)(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|COOKIE|SESSION|APIKEY|APISECRET)($|_)|^(GH_TOKEN|GITHUB_TOKEN)$/i;
+
+function childEnv(extra, envExtraNames) {
+  // Windows 上变量名大小写不稳定（SystemRoot vs SYSTEMROOT），按大写形式比对
+  const keep = new Set(ENV_KEEP.concat(Array.isArray(envExtraNames) ? envExtraNames : []).map(s => String(s).toUpperCase()));
+  const out = {};
+  for (const [name, v] of Object.entries(process.env)) {
+    if (typeof v !== 'string' || !v.length) continue;
+    if (!keep.has(name.toUpperCase())) continue;
+    if (SECRET_SHAPED.test(name.toUpperCase())) continue;
+    out[name] = v;
+  }
+  // 适配器自己注入的（ELECTRON_RUN_AS_NODE、ZCode 的 provider 路径等）优先级最高
+  for (const [k, v] of Object.entries(extra || {})) {
+    if (typeof v === 'string' && v.length) out[k] = v;
+  }
+  return out;
+}
+
 class GroupServer {
   constructor(opts) {
     this.dataDir = opts.dataDir;
@@ -29,7 +65,7 @@ class GroupServer {
     this.store = new Store(this.dataDir);
 
     const defaultWorkspace = path.join(os.homedir(), 'HarnessChat工作区');
-    this.config = this.store.loadConfig({ workspace: defaultWorkspace, members: {}, membersCustom: [], firstRunAck: false });
+    this.config = this.store.loadConfig({ workspace: defaultWorkspace, members: {}, membersCustom: [], firstRunAck: false, envExtra: [] });
     try { fs.mkdirSync(this.config.workspace, { recursive: true }); } catch (e) {}
 
     // 成员 = 内置适配器 + 用户设置覆盖（enabled/defaultModel/timeoutMin/modeId/programPath）
@@ -306,7 +342,10 @@ class GroupServer {
       return task;
     }
 
-    const env = { ...process.env, ...(built.env || {}) };
+    // 子进程环境按白名单构造：默认丢弃，而不是默认继承。
+    // 原因：这台机器上每个 harness 的 key 都可能在 process.env 里，而成员 CLI 一律靠
+    // 自己的登录态/配置目录鉴权（~/.codex、~/.gemini、~/.zcode…），不需要也不该拿到别人的密钥。
+    const env = childEnv(built.env || {}, this.config.envExtra);
     let child;
     try {
       child = safeExec(built.file, built.args, { cwd: workDir, env });
@@ -373,4 +412,4 @@ class GroupServer {
   }
 }
 
-module.exports = { GroupServer, id };
+module.exports = { GroupServer, id, childEnv, ENV_KEEP };

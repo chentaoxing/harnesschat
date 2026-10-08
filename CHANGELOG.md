@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0 (2026-10-08)
+
+派单安全收紧。两条都是社区同类工具的通病（调研见 README 引的 SECURITY.md），此前我们也有：
+
+- **子进程环境改为白名单**：以前是 `{ ...process.env, ...built.env }`，也就是每次派单，那个 CLI 都能看到本机环境变量里所有别的家的 key。现在只放行 OS 起跑必需项 + 各家自己的家目录/配置目录 + 代理变量，密钥形状的名字一律不过（第二道网）。真机实测：子进程可见变量 29 个，塞进去的 canary `ANTHROPIC_API_KEY` / `GH_TOKEN` 都没过去，ZCode 仍正常起跑到它自己的网关。确实需要多放行一个变量时，在配置里写 `envExtra: ["VAR_NAME"]`（只写名字，不写值）。
+- **8 个内置成员的默认权限模式全部改为不绕过**：此前 zcode(`--mode yolo`)、gemini(`-y`)、qoder(`bypass_permissions`)、hermes(`--yolo`) 的**默认档**就是绕过 flag，README 里"conservative default, bypass opt-in"那句是不准的。现在绕过档仍在，但要你在设置里显式选。
+- 新增 `scripts/security-checks.cjs`：把上面两条变成断言（35 项），bypass flag 一旦回到某个默认 argv、或密钥形状的变量一旦穿过环境过滤，就直接失败退出，别发版。
+- 代价说清楚：无头模式没有审批通道，保守档下成员可能**拒绝写文件**而不是报错卡住。想让它放开的，按成员逐个开绕过档，风险自担（SECURITY.md 有说明）。
+
 ## 0.4.0 (2026-10-08)
 
 - **外部会话雷达 + 一键接手**（`src/server/sessions.js`）：读各家 harness 自己落在盘上的转录，列出「哪个会话、在哪个工作区、最后要它做什么、多久没动、是不是半路死了、死在哪」。侧栏「🛰 外部会话」，死掉的会话数量直接标成角标。目前认得 ZCode（`~/.zcode/cli/rollout`）、Claude Code（`~/.claude/projects/<目录名即工作区>`）、Codex（`~/.codex/sessions/YYYY/MM/DD`）。

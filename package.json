@@ -1,7 +1,7 @@
 {
   "name": "harnesschat",
   "productName": "HarnessChat",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Group-chat for AI coding harnesses: @-mention an agent, watch it work in real time. 像微信群一样把各 AI harness 拉进群聊派活。",
   "main": "src/main.js",
   "author": "AlphaC",

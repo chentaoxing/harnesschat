@@ -18,8 +18,9 @@ Most agent orchestrators in 2026 are worktree/diff/PR centric — they treat age
 - **Threads with continuation** — every dispatched task opens a thread; "继续对话" stitches the previous prompt + output tail into the next prompt as working memory.
 - **Per-member default model** — each harness has different models with different prices; set the default per member, and override the model on any single message.
 - **Custom members via command template** — any CLI agent works: fill in `program` + argument template with `{{prompt}}` / `{{model}}` / `{{cwd}}` placeholders. No code needed.
-- **Permission modes per member** — pick how aggressive each harness runs (e.g. yolo / acceptEdits / default flags).
-- **Workspace as security boundary** — headless members run inside the group workspace directory.
+- **Permission modes per member** — the default mode of every built-in member is a non-bypassing one; yolo/bypass is always a separate, explicit opt-in in Settings.
+- **Scrubbed child environment** — members are launched with an allow-listed environment (OS essentials + their own config dirs + proxy), never your whole `process.env`. One harness cannot read another vendor's API key.
+- **Workspace as security boundary** — headless members run inside the group workspace directory (a takeover dispatch runs in the dead session's own directory, by design).
 - **Local-only + token auth** — the embedded server binds to 127.0.0.1 with a random per-install token; nothing phones home.
 - **Session radar & takeover** — reads the transcripts each harness already writes to disk (ZCode, Claude Code, Codex), shows which sessions are still running, gone quiet, or **died mid-task and why** (quota exhausted, auth failure, dropped connection), and hands any of them to another member — *in that session's own working directory*, so the work continues instead of being re-explained.
 - **Tray-resident** — closing the window keeps the group working; quit from the tray menu.

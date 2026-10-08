@@ -175,8 +175,8 @@ const MEMBERS = [
     defaultModel: '',
     timeoutMin: 15,
     modes: [
-      { id: 'auto', args: ['--mode', 'yolo'] },
-      { id: 'edit', args: ['--mode', 'edit'] }
+      { id: 'edit', args: ['--mode', 'edit'] },
+      { id: 'auto', args: ['--mode', 'yolo'], bypass: true }
     ],
     noteZh: 'zcode -p 无头模式；用应用内置 Node 跑，并显式注入 ZCode 桌面端落盘的 provider 配置路径（没注入=没找到 ~/.zcode/v2，请先用桌面端登录一次）',
     noteEn: 'zcode headless on the bundled Node; the provider config paths written by the ZCode desktop app are injected explicitly (missing means no ~/.zcode/v2 — log in once with the desktop app)',
@@ -201,7 +201,7 @@ const MEMBERS = [
     timeoutMin: 15,
     modes: [
       { id: 'acceptEdits', args: ['--permission-mode', 'acceptEdits'] },
-      { id: 'bypass', args: ['--permission-mode', 'bypassPermissions'] }
+      { id: 'bypass', args: ['--permission-mode', 'bypassPermissions'], bypass: true }
     ],
     noteZh: 'claude -p 无头模式',
     noteEn: 'claude headless mode',
@@ -223,7 +223,7 @@ const MEMBERS = [
     timeoutMin: 15,
     modes: [
       { id: 'default', args: [] },
-      { id: 'bypass', args: ['--dangerously-bypass-approvals-and-sandbox'] }
+      { id: 'bypass', args: ['--dangerously-bypass-approvals-and-sandbox'], bypass: true }
     ],
     noteZh: 'codex exec；模型走其自身配置的 provider（本地中转型配置需中转在线）',
     noteEn: 'codex exec; uses its own configured provider (local relays must be running)',
@@ -245,8 +245,8 @@ const MEMBERS = [
     defaultModel: '',
     timeoutMin: 15,
     modes: [
-      { id: 'auto', args: ['-y'] },
-      { id: 'default', args: [] }
+      { id: 'default', args: [] },
+      { id: 'auto', args: ['-y'], bypass: true }
     ],
     noteZh: 'gemini -p 无头模式',
     noteEn: 'gemini headless mode',
@@ -267,8 +267,8 @@ const MEMBERS = [
     defaultModel: '',
     timeoutMin: 15,
     modes: [
-      { id: 'bypass', args: ['--permission-mode', 'bypass_permissions'] },
-      { id: 'default', args: [] }
+      { id: 'default', args: [] },
+      { id: 'bypass', args: ['--permission-mode', 'bypass_permissions'], bypass: true }
     ],
     noteZh: 'qoderclicn -p；bypass 模式下仅在群工作区运行',
     noteEn: 'qoderclicn -p; bypass mode runs inside the group workspace only',
@@ -309,8 +309,8 @@ const MEMBERS = [
     defaultModel: '',
     timeoutMin: 15,
     modes: [
-      { id: 'yolo', args: ['--yolo'] },
-      { id: 'default', args: [] }
+      { id: 'default', args: [] },
+      { id: 'yolo', args: ['--yolo'], bypass: true }
     ],
     noteZh: 'hermes -z 无头模式',
     noteEn: 'hermes headless mode',

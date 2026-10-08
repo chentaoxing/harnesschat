@@ -11,8 +11,11 @@ HarnessChat launches AI harness CLIs (Codex, Claude Code, Qoder CLI, …) as **l
 ## Built-in mitigations
 
 - The embedded server binds to `127.0.0.1` only, and requires a random per-install token (stored in the app's user-data directory) for its HTTP/WS API.
-- Child processes are spawned as an argv array **without a shell**, so chat text cannot inject shell metacharacters into the command line.
-- The workspace directory is the intended blast radius. Point it at a dedicated folder, not your home directory.
+- Child processes are spawned as an argv array **without a shell**, so chat text cannot inject shell metacharacters into the command line. `stdin` is closed on every spawn (a CLI that waits on a pipe would otherwise hang a headless dispatch).
+- **Child environment is allow-listed, not inherited.** A member gets the OS essentials, its own home/app-data locations, and the proxy variables — and nothing else. API keys and other `*_KEY` / `*_TOKEN` / `*_SECRET` variables that happen to live in your environment are never passed down, so one member cannot read another vendor's credentials. Each harness authenticates with its own login on disk. If a member genuinely needs an extra variable, add its **name** to `envExtra` in the app config (names only, never values).
+- **The default permission mode of every built-in member never carries a bypass flag.** yolo / `-y` / `--dangerously-skip-permissions` / `bypassPermissions` exist only as an explicit, per-member opt-in in Settings.
+- Both properties above are enforced by an executable check, not by documentation: `node scripts/security-checks.cjs` fails the build if a bypass flag reappears in a default argv or a secret-shaped variable survives the environment filter.
+- The workspace directory is the intended blast radius. Point it at a dedicated folder, not your home directory. Note that a *takeover* dispatch (from the session radar) runs in the dead session's own directory by design — that is a deliberate widening of the blast radius, so review the brief before sending.
 
 ## What you should do
 
