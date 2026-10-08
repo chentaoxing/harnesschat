@@ -13,6 +13,7 @@ const { WebSocketServer } = require('ws');
 const { safeExec } = require('./safe-spawn');
 const { MEMBERS, buildCustomSpawn, resolveCommand, resolveMemberProgram, listModels } = require('./adapters');
 const { Store } = require('./store');
+const { listSessions } = require('./sessions');
 
 const ANSI_RE = /[\u001b\u009b][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[-a-zA-Z\d/#&.:=?%@~_]*)*)?\u0007)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-ntqry=><~]))/g;
 const stripAnsi = (s) => s.replace(ANSI_RE, '');
@@ -118,6 +119,15 @@ class GroupServer {
     if (url.pathname.startsWith('/api/') && !this.authed(req)) {
       return json(401, { error: 'unauthorized' });
     }
+    if (req.method === 'GET' && url.pathname === '/api/sessions') {
+      // 外部会话雷达：读各家 harness 自己落在盘上的会话，供"接手"用
+      const n = Math.min(Math.max(parseInt(url.searchParams.get('limit') || '12', 10) || 12, 1), 50);
+      try {
+        return json(200, listSessions({ limitPerHarness: n, harness: url.searchParams.get('harness') || null }));
+      } catch (e) {
+        return json(500, { error: String((e && e.message) || e) });
+      }
+    }
     if (req.method === 'GET' && url.pathname === '/api/models') {
       const member = this.memberById(url.searchParams.get('member') || '');
       const r = listModels(member);
@@ -150,8 +160,8 @@ class GroupServer {
       req.on('data', c => { body += c; if (body.length > 512 * 1024) req.destroy(); });
       req.on('end', () => {
         try {
-          const { text, prompt, memberId, threadId, model } = JSON.parse(body);
-          return json(200, this.handleSend(String(text || ''), String(prompt || '') || String(text || ''), memberId || null, threadId || null, model || null));
+          const { text, prompt, memberId, threadId, model, cwd } = JSON.parse(body);
+          return json(200, this.handleSend(String(text || ''), String(prompt || '') || String(text || ''), memberId || null, threadId || null, model || null, cwd || null));
         } catch (e) { return json(400, { error: String(e.message || e) }); }
       });
       return;
@@ -239,7 +249,7 @@ class GroupServer {
     return null;
   }
 
-  handleSend(text, prompt, memberId, threadId, modelOverride) {
+  handleSend(text, prompt, memberId, threadId, modelOverride, cwd) {
     const now = Date.now();
     this.push({ id: id(), type: 'user', text, at: now, threadId: threadId || null });
 
@@ -257,20 +267,35 @@ class GroupServer {
       .replace(new RegExp(`@${member.id}`, 'gi'), '')
       .trim() || prompt;
     const tid = threadId || id();
-    return { ok: true, dispatched: true, threadId: tid, task: this.runTask(member, cleanPrompt, tid, modelOverride) };
+    return { ok: true, dispatched: true, threadId: tid, task: this.runTask(member, cleanPrompt, tid, modelOverride, cwd) };
   }
 
-  runTask(member, prompt, threadId, modelOverride) {
+  /**
+   * 接手外部死掉的会话时，活必须干在那个会话自己的目录里——
+   * 否则"接手"只是把别人的问题在别处重答一遍。只接受已存在的绝对目录，其余一律回落到群工作区。
+   */
+  static resolveWorkDir(maybeDir, fallback) {
+    try {
+      const p = String(maybeDir || '').trim();
+      if (!p || !path.isAbsolute(p)) return fallback;
+      return fs.statSync(p).isDirectory() ? p : fallback;
+    } catch (e) {
+      return fallback;
+    }
+  }
+
+  runTask(member, prompt, threadId, modelOverride, cwdOverride) {
     const model = modelOverride || member.defaultModel || '';
+    const workDir = GroupServer.resolveWorkDir(cwdOverride, this.config.workspace);
     const task = {
       id: id(), type: 'task', threadId, memberId: member.id, memberName: member.name,
-      color: member.color, prompt, text: '', status: 'running', at: Date.now(), model
+      color: member.color, prompt, text: '', status: 'running', at: Date.now(), model, cwd: workDir
     };
     this.push(task);
 
     const built = member.custom
-      ? buildCustomSpawn(member, { prompt, model, cwd: this.config.workspace }, resolveCommand)
-      : member.buildSpawn({ prompt, model, cwd: this.config.workspace }, resolveMemberProgram(member), this.modeArgs(member));
+      ? buildCustomSpawn(member, { prompt, model, cwd: workDir }, resolveCommand)
+      : member.buildSpawn({ prompt, model, cwd: workDir }, resolveMemberProgram(member), this.modeArgs(member));
     if (built && built.error) {
       task.status = 'error';
       task.text = built.error === 'NOT_FOUND'
@@ -284,7 +309,7 @@ class GroupServer {
     const env = { ...process.env, ...(built.env || {}) };
     let child;
     try {
-      child = safeExec(built.file, built.args, { cwd: this.config.workspace, env });
+      child = safeExec(built.file, built.args, { cwd: workDir, env });
     } catch (e) {
       task.status = 'error';
       task.text = '启动失败: ' + e.message;

@@ -10,13 +10,15 @@ const state = {
   messages: [],
   workspace: '',
   continueThread: null, // { threadId, memberId } 续话模式
+  takeover: null,       // { workspace, from } 接手外部会话：这一条派到那个目录去
   mentionOpen: false,
   mentionedMember: null,
   modelCache: {} // memberId -> {source, models}
 };
 
 const $ = (sel) => document.querySelector(sel);
-const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// 转义同时覆盖引号：多处 esc() 的结果被放进 title="…" / value="…" 属性里，只转 &<> 会被引号 breakout。
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 const fmtTime = (ts) => {
   const d = new Date(ts);
   const p = (n) => String(n).padStart(2, '0');
@@ -179,6 +181,12 @@ async function send() {
   const model = $('#model-input').value.trim();
   const payload = { text };
   if (model) payload.model = model;
+  if (state.takeover) {
+    // 接手：派到那条会话自己的工作区去，而不是群工作区
+    payload.cwd = state.takeover.workspace;
+    state.takeover = null;
+    updateComposerPlaceholder();
+  }
   if (state.continueThread) {
     payload.threadId = state.continueThread.threadId;
     payload.memberId = state.continueThread.memberId;
@@ -265,10 +273,83 @@ async function checkMention() {
 }
 
 function updateComposerPlaceholder() {
-  $('#input').placeholder = state.continueThread
+  const el = $('#input');
+  if (state.takeover) {
+    el.placeholder = `接手模式：这条会派到 ${state.takeover.workspace}（来自 ${state.takeover.from}）。发完自动退出。`;
+    return;
+  }
+  el.placeholder = state.continueThread
     ? `续话模式：接着 ${state.continueThread.memberName} 的任务串继续说…`
     : '输入消息，@成员 派任务（如：@Codex 把 README 翻成英文）';
 }
+
+// ---------- 外部会话雷达 ----------
+const STATE_LABEL = { dead: '半路死了', active: '在跑', idle: '静默', ended: '已结束' };
+let sessionsCache = [];
+
+function setSessionsStatus(t) { const el = $('#sessions-status'); if (el) el.textContent = t; }
+
+async function loadSessions(silent) {
+  if (!silent) setSessionsStatus('扫描中…');
+  try {
+    const r = await fetch(BASE + '/api/sessions?limit=12', { headers: authHeaders() });
+    const d = await r.json();
+    sessionsCache = d.rows || [];
+    const dead = sessionsCache.filter(s => s.state === 'dead').length;
+    const badge = $('#sessions-badge');
+    if (badge) { badge.textContent = dead ? String(dead) : ''; badge.classList.toggle('hidden', !dead); }
+    const src = (d.scanned || []).filter(s => s.found).map(s => `${s.label} ${s.found}`);
+    setSessionsStatus(`${sessionsCache.length} 条 · ${src.join(' / ') || '没读到任何 harness 的会话目录'}`);
+    if (!silent) renderSessions();
+  } catch (e) {
+    setSessionsStatus('扫描失败: ' + String((e && e.message) || e));
+  }
+}
+
+function renderSessions() {
+  const box = $('#sessions-list');
+  box.innerHTML = '';
+  if (!sessionsCache.length) {
+    box.innerHTML = '<div class="sess-empty">没读到任何 harness 的会话记录。目前认得 ZCode、Claude Code、Codex 三家落在自己目录里的转录。</div>';
+    return;
+  }
+  for (const s of sessionsCache) {
+    const div = document.createElement('div');
+    div.className = 'sess-row ' + s.state;
+    const when = s.minutesAgo < 60 ? `${s.minutesAgo} 分钟前` : `${Math.round(s.minutesAgo / 60)} 小时前`;
+    div.innerHTML = `
+      <div class="sess-head">
+        <b>${esc(s.harnessName)}</b>
+        <span class="sess-state ${s.state}">${STATE_LABEL[s.state] || esc(s.state)}</span>
+        <span class="sm-hint">${when} · ${s.sizeMb} MB${s.model ? ' · ' + esc(s.model) : ''}</span>
+      </div>
+      <div class="sess-wd" title="${esc(s.file || '')}">${esc(s.workspace || '工作区未知')}</div>
+      ${s.endReason ? `<div class="sess-why">停在：${esc(s.endReason)}</div>` : ''}
+      ${s.lastAsk || s.firstAsk ? `<div class="sess-ask">${esc(s.lastAsk || s.firstAsk)}</div>` : ''}
+      <div class="sess-acts"><button class="chip" data-act="take" ${s.workspace ? '' : 'disabled'}>接手到群聊</button></div>`;
+    const btn = div.querySelector('[data-act="take"]');
+    if (btn && s.workspace) btn.addEventListener('click', () => startTakeover(s));
+    box.appendChild(div);
+  }
+}
+
+function startTakeover(s) {
+  state.takeover = { workspace: s.workspace, from: `${s.harnessName} ${s.id}` };
+  state.continueThread = null;
+  $('#sessions-mask').classList.add('hidden');
+  $('#input').value = s.brief;
+  updateComposerPlaceholder();
+  $('#input').focus();
+}
+
+$('#btn-sessions').addEventListener('click', () => {
+  $('#sessions-mask').classList.remove('hidden');
+  renderSessions();
+  loadSessions(true);
+});
+$('#btn-sessions-close').addEventListener('click', () => $('#sessions-mask').classList.add('hidden'));
+$('#btn-sessions-refresh').addEventListener('click', () => loadSessions(false));
+$('#sessions-mask').addEventListener('click', (e) => { if (e.target.id === 'sessions-mask') $('#sessions-mask').classList.add('hidden'); });
 
 // ---------- 设置 ----------
 function openSettings() {
@@ -574,4 +655,5 @@ loadState().then(() => {
   showAppVersion();
   autoCheckUpdate();
   setInterval(autoCheckUpdate, 30 * 60 * 1000); // 开久了也能主动发现新版本
+  setTimeout(() => loadSessions(true), 1200);   // 静默扫一次外部会话，死了的在侧栏亮个数字
 });

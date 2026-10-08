@@ -21,6 +21,7 @@ Most agent orchestrators in 2026 are worktree/diff/PR centric — they treat age
 - **Permission modes per member** — pick how aggressive each harness runs (e.g. yolo / acceptEdits / default flags).
 - **Workspace as security boundary** — headless members run inside the group workspace directory.
 - **Local-only + token auth** — the embedded server binds to 127.0.0.1 with a random per-install token; nothing phones home.
+- **Session radar & takeover** — reads the transcripts each harness already writes to disk (ZCode, Claude Code, Codex), shows which sessions are still running, gone quiet, or **died mid-task and why** (quota exhausted, auth failure, dropped connection), and hands any of them to another member — *in that session's own working directory*, so the work continues instead of being re-explained.
 - **Tray-resident** — closing the window keeps the group working; quit from the tray menu.
 - **Bundled Node runtime** — members whose CLI ships as a `.js`/`.cjs` entry (ZCode, Cline via npx) run on the Node embedded in Electron, so a system Node is no longer required.
 - **Self-updating** — checks this repo's GitHub Releases on startup and every 30 minutes, then downloads and launches the installer from inside the app.
@@ -75,7 +76,7 @@ Read [SECURITY.md](SECURITY.md) before daily use. Short version: depending on th
 
 ## Known limitations
 
-- This is one-shot headless dispatch: the stitched context of a "continue" lives in the prompt we send, not in the harness's own session tree, and HarnessChat does not read your existing TUI sessions. Attaching to the harness's own live session (so both sides share one thread) is on the roadmap.
+- The session radar reads transcript files where each harness puts them; it never writes to another tool's directory, and it only shows harnesses whose layout it recognises (ZCode, Claude Code, Codex today). It reconstructs a session's working directory, its last request and the error it stopped on — enough to hand the work over, not a live re-attach into that harness's own session tree (still on the roadmap).
 - Windows is the primary tested platform; macOS/Linux work via `which`-based detection but are less battle-tested. Issues welcome.
 - The icon is generated with a Qwen-Image workflow; the build script (`build-icon.js`) packages it reproducibly.
 

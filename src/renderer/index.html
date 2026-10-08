@@ -15,6 +15,7 @@
     </div>
     <div class="member-list" id="member-list"></div>
     <div class="sidebar-foot">
+      <button id="btn-sessions" class="ghost-btn">🛰 外部会话 Sessions <span id="sessions-badge" class="badge hidden"></span></button>
       <button id="btn-settings" class="ghost-btn">⚙ 设置 Settings</button>
     </div>
   </aside>
@@ -48,6 +49,21 @@
     <p class="en">HarnessChat runs AI harnesses (Codex, Claude Code, Qoder CLI…) as command-line processes inside the <strong>group workspace directory</strong>. Depending on the permission mode you pick per member, they may <strong>read/write files and run commands without confirmation</strong>. Only add harnesses you trust, and point the workspace at a dedicated directory.</p>
     <div class="set-actions">
       <button id="btn-firstrun-ok" class="primary-btn">我已了解 / I understand</button>
+    </div>
+  </div>
+</div>
+
+<!-- 外部会话雷达 -->
+<div id="sessions-mask" class="hidden">
+  <div id="sessions">
+    <h3>外部会话 <span class="sm-hint">各 harness 自己在终端里跑的会话；死了的能一键接手</span></h3>
+    <div class="sess-toolbar">
+      <button id="btn-sessions-refresh" class="chip">重新扫描</button>
+      <span id="sessions-status" class="sm-hint"></span>
+    </div>
+    <div id="sessions-list"></div>
+    <div class="set-actions">
+      <button id="btn-sessions-close" class="ghost-btn">关闭 Close</button>
     </div>
   </div>
 </div>
