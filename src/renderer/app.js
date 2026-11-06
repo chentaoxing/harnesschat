@@ -106,6 +106,27 @@ function deliveryHTML(t) {
       ${d.reason ? `<div class="dv-reason">${esc(d.reason)}</div>` : ''}
       ${d.next ? `<div class="dv-next">${esc(d.next)}</div>` : ''}
       ${d.cwd ? `<div class="dv-cwd" title="${esc(d.cwd)}">在 ${esc(d.cwd)}</div>` : ''}
+      ${landingHTML(d.landing)}
+    </div>`;
+}
+
+// 产出落点：成员写不了盘时，控制台把它的回答原文落成了文件。
+// 这一块必须和上面的交付判定分开说清楚——判定说的是"它动了没动手"，
+// 落点说的是"你现在有个能打开的东西"。两者不许互相冒充。
+function landingHTML(L) {
+  if (!L) return '';
+  if (!L.ok) {
+    return `<div class="task-landing failed"><div class="ld-head"><b>落点</b><span class="ld-verdict">没写成</span></div><div class="ld-note">${esc(L.note || L.error || '')}</div></div>`;
+  }
+  const files = (L.files || []).slice(0, 8).map(f =>
+    `<button class="ld-file" data-abs="${esc(f.abs)}" title="${esc(f.abs)} · ${esc(String(f.size || 0))} 字节">${f.kind === 'answer' ? '📄' : '🧩'} ${esc(f.name)}</button>`).join('');
+  const more = (L.files || []).length > 8 ? `<span class="dv-more">还有 ${(L.files || []).length - 8} 个</span>` : '';
+  return `
+    <div class="task-landing">
+      <div class="ld-head"><b>落点</b><span class="ld-verdict">${(L.files || []).length} 个文件</span>${L.truncated ? '<span class="dv-partial">有截断</span>' : ''}
+        <button class="ld-dir" data-abs="${esc(L.dir)}" title="${esc(L.dir)}">打开文件夹</button></div>
+      <div class="ld-files">${files}${more}</div>
+      <div class="ld-note">${esc(L.note || '')}</div>
     </div>`;
 }
 
@@ -708,6 +729,31 @@ async function saveSettings() {
   $('#settings-mask').classList.add('hidden');
   await loadState();
 }
+
+// ---------- 落点文件：点开 ----------
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.ld-file, .ld-dir');
+  if (!btn) return;
+  const p = btn.getAttribute('data-abs');
+  if (!p || !window.harnesschat) return;
+  const label = btn.textContent;
+  btn.disabled = true;
+  try {
+    const r = btn.classList.contains('ld-dir')
+      ? await window.harnesschat.showItem(p)
+      : await window.harnesschat.openPath(p);
+    if (r && r.error) {
+      btn.textContent = '打不开：' + r.error;
+      setTimeout(() => { btn.textContent = label; btn.disabled = false; }, 2600);
+      return;
+    }
+  } catch (err) {
+    btn.textContent = '打不开：' + String((err && err.message) || err);
+    setTimeout(() => { btn.textContent = label; btn.disabled = false; }, 2600);
+    return;
+  }
+  btn.disabled = false;
+});
 
 // ---------- 任务卡按钮 ----------
 document.addEventListener('click', async (e) => {

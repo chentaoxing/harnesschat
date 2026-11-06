@@ -126,4 +126,4 @@ function everyHours(config) {
   return Math.min(168, Math.max(6, raw)); // 下限 6 小时：不许把全机额度刷成秒表
 }
 
-module.exports = { init, record, judge, latest, greenDoors, probePrompt, canaryLinePresent, autoEnabled, everyHours, LAYER_REASON };
+module.exports = { init, record, judge, latest, greenDoors, probePrompt, canaryLinePresent, autoEnabled, everyHours, LAYER_REASON, dataFilePath: () => filePath };

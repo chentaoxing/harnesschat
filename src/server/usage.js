@@ -204,4 +204,4 @@ function deriveStatus(exitOk, output) {
   return BARE_ERROR_HEAD.test(s) ? 'error' : 'done';
 }
 
-module.exports = { init, record, snapshot, isBlocked, classifyError, deriveStatus, COOLDOWN_MS };
+module.exports = { init, record, snapshot, isBlocked, classifyError, deriveStatus, COOLDOWN_MS, dataFilePath: () => filePath };

@@ -18,6 +18,7 @@ const usage = require('./usage');
 const terminalUsage = require('./terminal-usage');
 const health = require('./health');
 const delivery = require('./delivery');
+const landing = require('./landing');
 const { assertNoForeignCredentials } = require('./guard');
 
 const ANSI_RE = /[\u001b\u009b][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[-a-zA-Z\d/#&.:=?%@~_]*)*)?\u0007)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-ntqry=><~]))/g;
@@ -157,6 +158,12 @@ class GroupServer {
   }
 
   memberById(idv) { return this.members.find(m => m.id === idv); }
+
+  // 交付快照要排除控制台自己的账本：工作区万一与 dataDir 同目录，
+  // messages.jsonl 每单都在变，会把"只动嘴"的成员称成"有产出"。
+  snapshotOpts() {
+    return { excludeAbs: [this.store.configPath, this.store.msgPath, usage.dataFilePath(), health.dataFilePath()].filter(Boolean) };
+  }
 
   onHttp(req, res) {
     const json = (code, obj) => {
@@ -428,7 +435,7 @@ class GroupServer {
     // 只有真派单才取（体检探针是只读的，取它等于每天白扫两遍全工作区）。
     if (delivery.shouldAttach(task)) {
       try {
-        task._pre = { snap: delivery.snapshotDir(workDir), git: delivery.gitInfo(workDir) };
+        task._pre = { snap: delivery.snapshotDir(workDir, this.snapshotOpts()), git: delivery.gitInfo(workDir) };
       } catch (e) {
         task._pre = { error: String((e && e.message) || e).slice(0, 120) };
       }
@@ -546,7 +553,7 @@ class GroupServer {
     // 交付结论：起跑前的快照 vs 现在的快照 + git 两侧对比，全部由我们称，不引用成员的自述。
     if (delivery.shouldAttach(task) && task._pre && task._pre.snap) {
       try {
-        const afterSnap = delivery.snapshotDir(task.cwd);
+        const afterSnap = delivery.snapshotDir(task.cwd, this.snapshotOpts());
         const afterGit = delivery.gitInfo(task.cwd);
         const d = delivery.diff(task._pre.snap, afterSnap);
         task.delivery = delivery.summarize({
@@ -554,6 +561,17 @@ class GroupServer {
           gitBefore: task._pre.git, gitAfter: afterGit
         });
         task.delivery.cwd = task.cwd;
+        // 产出落点：成员自己没动盘时（本机唯一那扇绿门在保守档下就是写不了文件），
+        // 由控制台把它的回答原文落成工作区里的文件，让"回来验收"这一步有个能打开的东西。
+        // 顺序要紧：先称完差异再落点，落点绝不参与上面的判定。
+        const grew = (afterGit.count || 0) > ((task._pre.git || {}).count || 0);
+        if (landing.shouldLand({ status: finalStatus, changed: task.delivery.changed, grew, text: task.text, quiet: task.quiet, taskKind: task.taskKind })) {
+          const w = landing.write({ dir: task.cwd, taskId: task.id, text: task.text, now: Date.now() });
+          task.delivery.landing = {
+            ok: !!w.ok, dir: w.dir || '', files: w.files || [], truncated: !!w.truncated,
+            note: landing.describe(w), error: w.error || ''
+          };
+        }
       } catch (e) {
         task.delivery = { verdict: 'unknown', headline: '交付差异没称出来', next: '扫描失败：' + String((e && e.message) || e).slice(0, 120), artifacts: [] };
       }

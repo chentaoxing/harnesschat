@@ -349,3 +349,16 @@ body { font-family: "Microsoft YaHei", "Segoe UI", sans-serif; font-size: 14px; 
 
 .task-delivery.blocked_by_permission { background: #f2f6fd; border-left-color: #2f6fd0; }
 .blocked_by_permission .dv-verdict { background: #e2ecfb; color: #1f4fa5; }
+
+/* 产出落点：控制台代落的回答原文。视觉上与"交付判定"分开，免得被当成成员自己写的 */
+.task-landing { margin-top: 7px; padding: 7px 9px; border-radius: 7px; background: #fff; border: 1px dashed #cfd6e0; }
+.task-landing.failed { border-color: #e6b8b8; background: #fdf6f6; }
+.ld-head { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.ld-verdict { font-size: 11px; padding: 1px 7px; border-radius: 9px; background: #eef1f6; color: #4b5563; }
+.ld-dir { margin-left: auto; font-size: 11px; padding: 1px 8px; border: 1px solid #d7dce4; border-radius: 6px; background: #fff; cursor: pointer; color: #374151; }
+.ld-dir:hover { background: #f3f5f9; }
+.ld-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.ld-file { font-size: 11.5px; background: #f7f9fc; border: 1px solid #dbe2ec; border-radius: 6px; padding: 2px 8px; cursor: pointer; font-family: ui-monospace, Consolas, monospace; color: #1f2937; }
+.ld-file:hover { background: #eaf1fb; border-color: #b9cbe8; }
+.ld-file:disabled { opacity: .6; cursor: default; }
+.ld-note { font-size: 11.5px; color: #6b7280; margin-top: 5px; line-height: 1.5; }

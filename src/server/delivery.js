@@ -12,7 +12,10 @@ const fs = require('fs');
 const path = require('path');
 const cp = require('child_process');
 
-const SKIP_DIRS = new Set(['.git', 'node_modules', '__pycache__']);
+// 控制台自己的"产出落点"目录：成员不能写盘时，由我们把它的回答原文落成文件。
+// 它必须被快照跳过——否则并发跑着的另一单会把我的落点当成它的产出，判成假绿。
+const LANDING_DIRNAME = '_落点';
+const SKIP_DIRS = new Set(['.git', 'node_modules', '__pycache__', LANDING_DIRNAME]);
 const DEFAULT_MAX_FILES = 4000;
 
 function toRel(root, full) {
@@ -35,6 +38,9 @@ function isToolInternal(relPath) {
 function snapshotDir(dir, opts) {
   const o = opts || {};
   const maxFiles = Number(o.maxFiles) || DEFAULT_MAX_FILES;
+  // 控制台自己的账本（messages/usage/health/config）每单都在变。工作区万一与 dataDir
+  // 同目录，它们就会被称成"成员的产出"——和 .qoder-credits 同一类假绿，显式挡掉。
+  const excludeAbs = new Set((Array.isArray(o.excludeAbs) ? o.excludeAbs : []).map(p => path.resolve(String(p))));
   const files = [];
   const visited = new Set();
   let truncated = false;
@@ -62,6 +68,7 @@ function snapshotDir(dir, opts) {
       }
       if (!ent.isFile()) continue;
       const p = path.join(cur, name);
+      if (excludeAbs.has(path.resolve(p))) continue; // 控制台自己的账本
       const rel = toRel(dir, p);
       if (isToolInternal(rel)) continue; // 成员自己的运行时痕迹不算交付
       let st;
@@ -111,7 +118,7 @@ function count(d) {
  */
 function gitInfo(dir) {
   const out = { isRepo: false, head: '', status: [], count: 0, error: '' };
-  const run = args => cp.execFileSync('git', args, { cwd: dir, encoding: 'utf8', timeout: 10000 });
+  const run = args => cp.execFileSync('git', args, { cwd: dir, encoding: 'utf8', timeout: 10000, stdio: ['ignore', 'pipe', 'pipe'] });
   try {
     out.head = String(run(['rev-parse', 'HEAD'])).trim();
   } catch (e) {
@@ -205,4 +212,4 @@ function shouldAttach(task) {
   return true;
 }
 
-module.exports = { snapshotDir, diff, gitInfo, summarize, shouldAttach, count, SKIP_DIRS, DEFAULT_MAX_FILES, MAX_ARTIFACTS };
+module.exports = { snapshotDir, diff, gitInfo, summarize, shouldAttach, count, SKIP_DIRS, DEFAULT_MAX_FILES, MAX_ARTIFACTS, LANDING_DIRNAME };

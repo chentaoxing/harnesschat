@@ -131,6 +131,21 @@ check('quiet 探针不附交付结论（否则每天 11 条"零产出"噪音）'
 check('真派单要附结论', delivery.shouldAttach({ quiet: false, taskKind: 'execute' }) === true);
 check('taskKind=health 也不附', delivery.shouldAttach({ quiet: false, taskKind: 'health' }) === false);
 
+// ---------- 9b. 控制台自己的账本不许算成成员的产出 ----------
+// 集成测试里真踩到了：工作区与 dataDir 同目录时，messages.jsonl 每单都在变，
+// 于是"只动嘴"的成员被判成 produced。这和 .qoder-credits 是同一类假绿，必须挡。
+dir = tmp();
+fs.writeFileSync(path.join(dir, 'messages.jsonl'), '{}\n');
+fs.writeFileSync(path.join(dir, 'usage.jsonl'), '{}\n');
+fs.writeFileSync(path.join(dir, '成员真产出.md'), 'x');
+const exBefore = delivery.snapshotDir(dir, { excludeAbs: [path.join(dir, 'messages.jsonl'), path.join(dir, 'usage.jsonl')] });
+fs.appendFileSync(path.join(dir, 'messages.jsonl'), '{}\n');
+fs.appendFileSync(path.join(dir, 'usage.jsonl'), '{}\n');
+const exDiff = delivery.diff(exBefore, delivery.snapshotDir(dir, { excludeAbs: [path.join(dir, 'messages.jsonl'), path.join(dir, 'usage.jsonl')] }));
+check('显式排除的自有账本不进快照', !JSON.stringify(exBefore.files).includes('messages.jsonl'), JSON.stringify(exBefore.files.map(f => f.path)));
+check('账本一直在变也称出 0 变化', delivery.count(exDiff) === 0, JSON.stringify(exDiff));
+check('同目录下成员的真产出照常计数', exBefore.files.some(f => f.path === '成员真产出.md'), JSON.stringify(exBefore.files.map(f => f.path)));
+
 // ---------- 10. 真服务端走一遍：动手的成员 vs 只动的嘴的成员 ----------
 const { GroupServer } = require('../src/server/server');
 const sleep = ms => new Promise(r => setTimeout(r, ms));

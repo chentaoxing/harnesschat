@@ -1,5 +1,5 @@
 // Electron 主进程：内嵌 HarnessChat 服务器 + 窗口 + 托盘常驻 + 自研更新器
-const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -11,6 +11,9 @@ let tray = null;
 const PORT = 18790;
 
 ipcMain.handle('app:version', () => app.getVersion());
+
+// 产出落点的"打开"：守卫与实现都在 landing-ipc 里，界面验收脚本注册的是同一份
+require('./landing-ipc').register(ipcMain, shell);
 
 // 更新器 IPC：进度用主进程→渲染进程单向推送，避免渲染层轮询
 ipcMain.handle('updater:check', () => updater.check());
