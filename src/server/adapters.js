@@ -107,6 +107,45 @@ function findCodebuddyCli(opts) {
   return null;
 }
 
+// QwenWork（阿里办公）本体是 Electron，没有 CLI；但它把一份 Qwen Code 运行时随产品带进来了：
+//   <安装根>\1.5.0-<build>\resources\agent-sdk\components\qwencode\<版本>\runtime\qwen-code\cli.js
+// 用同目录的 QwenWorkCN.exe 以 ELECTRON_RUN_AS_NODE 当 node 跑它，就是那家自己发布的 CLI。
+// 版本号目录会随应用升级换号，所以按版本名从新到旧找，新版没落地 cli.js 就回落到有的那版。
+const QWEN_COMP_REL = path.join('resources', 'agent-sdk', 'components', 'qwencode');
+function qwenWorkRoots(opts) {
+  if (opts && Array.isArray(opts.roots)) return opts.roots;
+  const bases = ['D:\\programs', 'C:\\Program Files', 'D:\\Program Files',
+    (process.env.LOCALAPPDATA || '') + '\\Programs'].filter(Boolean);
+  const out = [];
+  for (const base of bases) {
+    for (const name of ['QwenWorkCN', 'QwenWork', 'qwenwork']) {
+      const dir = path.join(base, name);
+      let vers = [];
+      try { vers = fs.readdirSync(dir, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name); } catch (e) { continue; }
+      for (const v of vers) out.push(path.join(dir, v));
+    }
+  }
+  return out;
+}
+
+function findQwenCodeCli(opts) {
+  for (const root of qwenWorkRoots(opts)) {
+    let exe = null;
+    try { fs.accessSync(path.join(root, 'QwenWorkCN.exe')); exe = true; } catch (e) { /* 这层不是安装版本目录 */ }
+    if (!exe) continue;
+    const compDir = path.join(root, QWEN_COMP_REL);
+    let versions = [];
+    try { versions = fs.readdirSync(compDir, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name); } catch (e) { continue; }
+    versions.sort().reverse(); // 版本串里带构建号，字典序倒排即"从新到旧"
+    for (const v of versions) {
+      const cli = path.join(compDir, v, 'runtime', 'qwen-code', 'cli.js');
+      try { fs.accessSync(cli); return cli; } catch (e) { /* 这版没带运行时，继续回落 */ }
+    }
+  }
+  return null;
+}
+
+
 // 代理变量必须逐个置 null 交给 childEnv 去删（实测：留着它会把登录态误报成没登录）
 const CODEBUDDY_PROXY_VARS = ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy'];
 function codebuddyEnv() {
@@ -139,16 +178,26 @@ function whichAll(cmd) {
 function parseCmdShim(cmdPath, cmdDir) {
   let text;
   try { text = fs.readFileSync(cmdPath, 'utf8'); } catch (e) { return null; }
+  // 垫片自己 set 的运行时开关要跟着带出来（DeepSeek Harness 靠 ELECTRON_RUN_AS_NODE 把主程序当 node 用）
+  const env = {};
+  const setEnv = text.match(/set\s+"([A-Z0-9_]+)=([^"%]+)"/i);
+  if (setEnv) env[setEnv[1]] = setEnv[2];
   let m = text.match(/"%_prog%"\s+"([^"]+\.js)"/); // npm 经典模板
-  if (m) return { file: m[1].replace(/%dp0%/gi, cmdDir), prefix: [], env: {} };
+  if (m) return { file: m[1].replace(/%dp0%/gi, cmdDir), prefix: [], env };
+  m = text.match(/"([^"]*\.exe)"\s+(-{1,2}[A-Za-z-]+)\s+"([^"]+\.js)"\s+%\*/)
+     || text.match(/"([^"]*\.exe)"\s+(-{1,2}[A-Za-z-]+)\s+"([^"]+\.js)"/i); // exe + 前置 flag + asar 内 js + %*（dsh 形状）
+  if (m) {
+    const rel = p => /%~dp0/i.test(p) ? path.resolve(cmdDir, p.replace(/%~dp0\\?/gi, '')) : p;
+    return { file: rel(m[1]), prefix: [m[2], rel(m[3])], env };
+  }
   m = text.match(/SET\s+"[A-Z_]*CLI_JS=%~dp0\\?([^"]+\.js)"/i); // npm 新版垫片
-  if (m) return { file: path.join(cmdDir, m[1]), prefix: [], env: {} };
+  if (m) return { file: path.join(cmdDir, m[1]), prefix: [], env };
   m = text.match(/"([^"]+\.exe)"\s+(-I)\s+(-c)\s+"([^"]+)"/); // python 风格（hermes）
-  if (m) return { file: m[1], prefix: ['-I', '-c', m[4]], env: {} };
+  if (m) return { file: m[1], prefix: ['-I', '-c', m[4]], env };
   m = text.match(/"(%dp0%\\[^"]+\.exe)"\s+%*/); // 直启 exe（%dp0% 相对垫片目录，如 claude）
-  if (m) return { file: m[1].replace(/%dp0%/gi, cmdDir), prefix: [], env: {} };
+  if (m) return { file: m[1].replace(/%dp0%/gi, cmdDir), prefix: [], env };
   m = text.match(/"%_prog%"\s+"([^"]+\.exe)"/); // 直启 exe
-  if (m) return { file: m[1], prefix: [], env: {} };
+  if (m) return { file: m[1], prefix: [], env };
   return null;
 }
 
@@ -217,7 +266,12 @@ const KNOWN_PATHS = {
     'D:\\Program Files\\ZCode\\resources\\glm\\zcode.cjs'
   ] : [
     '/Applications/ZCode.app/Contents/Resources/resources/glm/zcode.cjs'
-  ]
+  ],
+  // dsh 不在 PATH 上（实测 `where dsh` 找不到），垫片在应用内部 resources\runtime\cli\bin
+  dsh: IS_WIN ? [
+    'D:\\programs\\DeepSeek Harness\\resources\\runtime\\cli\\bin\\dsh.cmd',
+    'C:\\Program Files\\DeepSeek Harness\\resources\\runtime\\cli\\bin\\dsh.cmd'
+  ] : []
 };
 
 function resolveMemberProgram(member) {
@@ -439,6 +493,54 @@ const MEMBERS = [
       args.push('--model', task.model || 'custom-local:deepseek-v4-flash-free');
       return { file: shim.file, args, env: Object.assign({}, shim.env, codebuddyEnv()) };
     }
+  },
+  {
+    id: 'dsh',
+    name: 'DeepSeek Harness',
+    color: '#4d6bfe',
+    command: 'dsh',
+    modelSupport: false,
+    modelNote: '模型由它自己的 profiles/凭证决定，不支持在此指定',
+    defaultModel: '',
+    timeoutMin: 20,
+    modes: [
+      // 只此一档：dsh 的 CLI 里没有任何审批/绕过开关（实测 --help 全文无 approve/permission/yolo/skip 类参数），
+      // 所以这里不能凭空造一个"绕过档"。`--json` 是输出格式不是权限模式，不进 modes。
+      { id: 'headless', args: [] }
+    ],
+    noteZh: '官方自带的无头入口：`dsh headless "<任务>"` 答完即退，答案走 stdout、诊断走 stderr。实测它会回 MISSING_CREDENTIAL：要么在它的 Models 页面把凭证存进凭据服务，要么在系统环境里 export DEEPSEEK_API_KEY 并把变量名写进设置的"额外透传变量"。我不会去读它凭据服务里存的东西。',
+    noteEn: 'Official headless entry: `dsh headless "<task>"` answers once and exits (answer on stdout, diagnostics on stderr). Measured: it returns MISSING_CREDENTIAL until either its web Models page stores the credential or DEEPSEEK_API_KEY is exported in the launching environment and listed by name under Settings.',
+    buildSpawn(task, shim, modeArgs) {
+      if (!shim) return { error: 'NOT_FOUND' };
+      // 任务文本单独占一个 argv；不拼 shell、不走 stdin（safeExec 把 stdin 关着）
+      return { file: shim.file, args: [...shim.prefix, 'headless', ...modeArgs, task.prompt], env: shim.env };
+    }
+  },
+  {
+    id: 'qwenwork',
+    name: 'QwenWork (Qwen Code)',
+    color: '#ff6a00',
+    command: 'qwen',
+    modelSupport: true,
+    modelHint: '留空用它的默认模型，或填 -m 支持的名字',
+    defaultModel: '',
+    timeoutMin: 20,
+    modes: [
+      { id: 'default', args: ['--approval-mode', 'default'] },
+      { id: 'plan', args: ['--approval-mode', 'plan'] },
+      { id: 'auto-edit', args: ['--approval-mode', 'auto-edit'] },
+      { id: 'yolo', args: ['--yolo'], bypass: true }
+    ],
+    noteZh: 'QwenWork 本体没有 CLI，但它把 Qwen Code 运行时随产品带进来了（resources\\agent-sdk\\components\\qwencode\\<版本>\\runtime\\qwen-code\\cli.js），用同目录的 QwenWorkCN.exe 当 node 跑。实测这条 CLI 报 "No auth type is selected"：QwenWork 应用登录（.qwenworkcn）不等于 Qwen Code 的 auth——要么给它自己配 --auth-type/key（可指向你本机网关），要么在 ~/.qwen 里登录一次。我不会去取它应用内存的凭据。',
+    noteEn: 'QwenWork itself ships no CLI, but it bundles a Qwen Code runtime (resources\\agent-sdk\\components\\qwencode\\<ver>\\runtime\\qwen-code\\cli.js), runnable with its own QwenWorkCN.exe as Node. Measured: that CLI answers "No auth type is selected" — the app login is not Qwen Code auth. Give it its own --auth-type/key, or log in under ~/.qwen.',
+    resolveProgram() { return findQwenCodeCli(); },
+    buildSpawn(task, shim, modeArgs) {
+      if (!shim) return { error: 'NOT_FOUND' };
+      const args = [...shim.prefix, ...modeArgs, '-o', 'text', '--max-wall-time', String(Math.max(60, (task.timeoutMin || 20) * 60 - 30))];
+      if (task.model) args.push('-m', task.model);
+      args.push(task.prompt); // 位置参数即 prompt；单 token，不经 shell
+      return { file: shim.file, args, env: Object.assign({}, shim.env) };
+    }
   }
 ];
 
@@ -528,4 +630,4 @@ function listModels(member) {
   }
 }
 
-module.exports = { MEMBERS, buildCustomSpawn, resolveCommand, resolveMemberProgram, findNode, listModels, findCodebuddyCli, codebuddyEnv };
+module.exports = { MEMBERS, buildCustomSpawn, resolveCommand, resolveMemberProgram, findNode, listModels, findCodebuddyCli, codebuddyEnv, findQwenCodeCli, parseCmdShim };

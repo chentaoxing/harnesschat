@@ -38,7 +38,8 @@ function classifyError(ev) {
   const full = String(ev.output || ev.errorKind || '');
   const head = full.slice(0, HEADLINE_CHARS);
   if (/expired|coding plan|subscription|套餐/i.test(head)) return 'expired';
-  if (/invalid token|token is required|unauthorized|authentication failed|api.?key|missing key|Authentication required/i.test(head)) return 'auth';
+  if (/expired|coding plan|subscription|套餐/i.test(head)) return 'expired';
+  if (/invalid token|token is required|unauthorized|authentication failed|api.?key|missing key|missing_credential|no auth type|authentication required/i.test(head)) return 'auth';
   if (/NOT_FOUND|未检测到|无法定位/i.test(head)) return 'not_found';
   if (/timeout|timed out|ETIMEDOUT|超时|没有新数据/i.test(head)) return 'timeout';
   // 限流放在网关之前：真撞过额度时，绝不能因为消息里顺带出现 upstream 字样

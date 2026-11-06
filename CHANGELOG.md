@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.3 (2026-11-07)
+
+把本机 17 家 harness 全部盘了一遍，接入实测真有无头入口的两家：**DeepSeek Harness（dsh）** 和 **QwenWork 内嵌的 Qwen Code（阿里办公）**。顺带修掉一个凭证守卫的真漏洞。
+
+- **dsh 进门**：`dsh headless "<任务>"` 是它官方的一次性问答（答案走 stdout、诊断走 stderr），垫片形状是 `exe --expose-internals <asar 里的 cli.js> %*`，`parseCmdShim` 以前只认 npm/python/直启 exe 四形状，现在会拆这一种，并把垫片自己 `set` 的 `ELECTRON_RUN_AS_NODE` 一起带出来。dsh **只有一个模式档**：它的 `--help` 全文没有任何审批/绕过开关，所以这里不凭空造"绕过档"（`--json` 是输出格式，不是权限模式，不进 modes）。`where dsh` 找不到它，入口写进 `KNOWN_PATHS.dsh`。
+- **QwenWork 进门**：本体 Electron 无 CLI（`QwenWorkCN.exe --help` 直接开 GUI），但它把一份 Qwen Code 运行时随产品带进来了：`<安装版本目录>\resources\agent-sdk\components\qwencode\<版本>\runtime\qwen-code\cli.js`，用同目录的 `QwenWorkCN.exe` 当 node 跑。版本目录会随升级换号，`findQwenCodeCli()` 按版本名从新到旧找，新版没落地 `cli.js` 就回落到有的那版。默认档 `--approval-mode default`，并强制带 `--max-wall-time`（无人值守不许无限跑）；`--yolo` 单独一档且打 bypass 标记。
+- **两门都实弹验证过，但都还没通**：派单能起进程、能归层——dsh 回 `MISSING_CREDENTIAL … export DEEPSEEK_API_KEY in the launching environment`，Qwen Code 回 `No auth type is selected …`。账本两次都记成 `auth` 层、结论 `鉴权不通`（**不是"实测可用"**）。缺的都是它自己的 key/login，我不会去取应用内存的凭据。
+- **修掉一个凭证守卫的真漏洞**：自家目录判定原来是子串匹配，`.qwen` 会把 `.qwenworkcn`（QwenWork 应用自己的凭据目录，里面就是 `engine-maas-key.dat`）也认成自家，等于给这门开了一条合法指过去的路。现在按**路径段**匹配；`CRED_SHAPED` 补上"名字里带 key 的数据文件"（`engine-maas-key.dat`、`master-key.bin`），同时用反向用例保证 `cache-index.dat` / `sessions.dat` 不误伤。这条漏洞是断言抓出来的，不是读代码看出来的。
+- **补两类失败样本进尺子**：`MISSING_CREDENTIAL`、`No auth type is selected` 归 `auth`（缺 key 不会自己长出来，所以不进冷却）。
+- **17 家全表**（README 新增，逐家实测）：能接并已接 9 家 + 这次的 2 家 = **11 家**；其余 6 家给了明确的不接理由——Trae / Antigravity 的 `chat` 子命令只把 prompt 送进已开的 GUI 窗口、stdout 不回内容；Doubao 无 CLI（`command_helper.exe` 要父进程 pid）；OpenCode 本机只有桌面版、没有 `opencode` 命令；AutoClaw 的本体目录已不在机器上（只剩配置与日志）；Xiaomi MiMo 的 `mimocode` 数据目录齐全但可执行体没落地；SkillClaw 与 TDAI 是代理/记忆层，没有"传一个 prompt 拿回答"的入口。
+- 断言 162 → **196 项**（新增 `scripts/newdoors-checks.cjs` 30 项；`security-checks` 48→52）。实弹脚本 `scripts/live-member-check.cjs` 可对任意成员跑一单并把正文写进 UTF-8 日志。
+
+
 ## 0.5.2 (2026-11-07)
 
 把"没做的"做完：账本从"只记我派的"扩到"看得见它在终端里干的"，免费档的结论改成有证据的结论，CodeBuddy 接成成员——以及一个真机逼出来的假绿修复。

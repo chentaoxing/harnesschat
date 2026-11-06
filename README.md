@@ -43,6 +43,25 @@ Most agent orchestrators in 2026 are worktree/diff/PR centric — they treat age
 | Hermes | `hermes -z` | |
 | MiniMax Code | `minimax -p` | experimental; the mavis LLM endpoint needs an internal auth-broker lease — see SECURITY of their design |
 | CodeBuddy (cbc) | `codebuddy -p --output-format text --model custom-local:…` | the headless CLI shipped inside the WorkBuddy app. Two measured quirks are handled by the adapter: it must be told to load the `lite-wb` bundle (`CODEBUDDY_FORCE_LITE_WB_BUNDLE=1`), and proxy variables must be removed or its own config fetch throws and reports "not logged in". Its `custom-local:*` models come from `~/.workbuddy/models.json` and need e.g. `${NEWAPI_KEY}` in the environment — set it in your system environment and list the **name** under Settings → extra passed variables. Logging into WorkBuddy is the other route; HarnessChat never reads the keys that app stores. |
+| DeepSeek Harness | `dsh headless "<task>"` | official one-shot answer mode: the answer goes to stdout, diagnostics to stderr. Found via the app's own `.cmd` shim (it is not on `PATH`). Its CLI exposes **no** approval/bypass flag at all, so this member has exactly one mode. Measured blocker: `MISSING_CREDENTIAL` until `DEEPSEEK_API_KEY` is stored via its own Models page or exported in the launching environment. |
+| QwenWork / Qwen Code | `QwenWorkCN.exe <bundled qwen-code/cli.js> --approval-mode default -o text --max-wall-time N "<prompt>"` | QwenWork (the Alibaba office app) ships no CLI, but it bundles a Qwen Code runtime under `resources\agent-sdk\components\qwencode\<ver>\runtime\qwen-code\cli.js`; the adapter picks the newest version dir that actually contains the file. Measured blocker: `No auth type is selected` — the *app* login is not Qwen Code auth; give Qwen Code its own `--auth-type`/key or log it in under `~/.qwen`. |
+
+### The other harnesses on this machine, and why they are not members
+
+Every candidate below was checked by running its own `--help` / inspecting its install, not by guessing.
+
+| Harness | Headless entry | Verdict |
+|---|---|---|
+| ZCode, Claude Code, Codex, Gemini CLI, Qoder CLI, Cline, Hermes, MiniMax Code, WorkBuddy (cbc), DeepSeek Harness, QwenWork | yes | members (11) |
+| Trae CN / TRAE SOLO | `trae-cn chat "<prompt>"` exists, but every option is window control (`-m --mode`, `-r`, `-n`) — the prompt is delivered into an already-open GUI and nothing comes back on stdout | not a dispatch door |
+| Antigravity | same shape as Trae: `antigravity-ide chat` only opens a window; its `language_server` is a daemon with OAuth, not a one-shot prompt entry | not a dispatch door |
+| Doubao | no CLI; `command_helper.exe` refuses to run without a parent PID | not a dispatch door |
+| OpenCode | only the desktop app is installed here — `where opencode` finds nothing and there is no CLI inside the app dir | needs its own CLI installed first |
+| Xiaomi MiMo | the `mimocode` data/config/storage layout is present (OpenCode-style sessions) but the executable never landed (`.cache\mimocode\bin` is empty) | needs the CLI installed first |
+| AutoClaw | its install directory is gone from this machine; only `~/.openclaw-autoclaw` config and old gateway logs remain | not installed |
+| SkillClaw | a local OpenAI-compatible proxy + skill-injection daemon (`config: claw_type: hermes`, port 30000); its command surface is service lifecycle only | a layer, not a harness |
+| TDAI | TencentDB Agent Memory — a memory core + proxy that other harnesses point their base URL at | a layer, not a harness |
+
 
 Detection order: PATH → well-known install locations → manual path override in Settings. Members that aren't found are greyed out, and you can always add your own via the command template.
 
