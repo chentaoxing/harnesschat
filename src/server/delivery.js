@@ -19,6 +19,15 @@ function toRel(root, full) {
   return path.relative(root, full).split(path.sep).join('/');
 }
 
+// 点目录是各家 harness 自己的运行时痕迹（.qoder-credits、.claude、.next…），
+// 不是这一单的产出——2026-11-07 就是把 `.qoder-credits/report.json` 当成了"有交付"，
+// 而成员其实回的是"需要您授权写入权限才能创建该文件"。
+// 顶层点文件（.gitignore、.env.example）保留：那常常就是真产出。
+function isToolInternal(relPath) {
+  const segs = String(relPath || '').split('/');
+  return segs.slice(0, -1).some(seg => seg.startsWith('.'));
+}
+
 /**
  * 目录快照：只记路径 + 大小 + mtime，不碰正文。
  * visited 按 realpath 去重——E 盘上大量 junction 会指回上层，不挡就无限递归。
@@ -53,9 +62,11 @@ function snapshotDir(dir, opts) {
       }
       if (!ent.isFile()) continue;
       const p = path.join(cur, name);
+      const rel = toRel(dir, p);
+      if (isToolInternal(rel)) continue; // 成员自己的运行时痕迹不算交付
       let st;
       try { st = fs.statSync(p); } catch (e) { continue; }
-      files.push({ path: toRel(dir, p), size: st.size, mtimeMs: Math.round(st.mtimeMs) });
+      files.push({ path: rel, size: st.size, mtimeMs: Math.round(st.mtimeMs) });
     }
   }
   files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
@@ -123,6 +134,11 @@ function gitInfo(dir) {
 
 const MAX_ARTIFACTS = 30;
 
+// 明确拒绝写盘的说法。**必须出现在行首**（可带 [error]: 之类前缀）：
+// 拒绝就是整行在拒绝，散文里顺带出现 "permission denied" 不算——
+// 实测那条英文反例 "This error message mentions permission denied in passing." 就是靠这条锚点排除的。
+const REFUSAL = /(?:^|\n)[\s>\-*]*(?:\(?error\)?[:：]\s*)?(?:需要.{0,8}授权|请授权|无法(?:写入|修改|创建)|没有(?:写入|修改)权限|permission (?:to (?:edit|write|create)|denied)|not (?:authorized|permitted)|i ?cannot (?:write|create|edit))/i;
+
 /**
  * 把两层证据合成一句人话 + 一句有据可查的下一步。
  * verdict：produced（盘上真变了）/ talked_only（它说了，但盘上没变）/ failed（没跑成）
@@ -147,6 +163,14 @@ function summarize(ev) {
     };
   }
   if (n === 0 && !grew) {
+    if (REFUSAL.test(String(ev.output || ''))) {
+      return {
+        verdict: 'blocked_by_permission', changed: 0, partial: !!d.partial, artifacts: [],
+        headline: '文件没变化（0 个）· 它明说了要授权',
+        reason: '这一扇门的权限档拦住了写盘：它回的是"需要授权才能创建/修改"，不是做完了。无头模式没有审批通道，保守档就是这个表现。',
+        next: '要它真动手：设置里给这扇门切到 acceptEdits/auto-edit 一档（风险自担），或者把任务改成只读产出（只回答、不写文件）。'
+      };
+    }
     return {
       verdict: 'talked_only', changed: 0, partial: !!d.partial, artifacts: [],
       headline: '文件没变化（0 个）' + (ga.isRepo ? ' · git 也没动' : ''),

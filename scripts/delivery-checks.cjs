@@ -180,7 +180,40 @@ const TALKER = [{
   check('重启后卡片仍然说得出当时改了哪些文件', !!(card && card.delivery && JSON.stringify(card.delivery.artifacts).includes('report.md')), JSON.stringify(card && card.delivery));
   check('回放不会把交付当成一条独立消息塞进群聊（转录里只有卡片）', replayed.filter(m => m.type === 'task_delivery').length === 0, String(replayed.filter(m => m.type === 'task_delivery').length));
 
-  console.log(`\n交付闭环断言：${oks.length} 通过 / ${fails.length} 失败`);
+  // ---------- 11. 真机抓到的自造假绿：成员自己的运行时账本不算交付 ----------
+// 2026-11-07 实测：让 Qoder CLI 在群工作区建一个文件，它回"需要您授权写入权限才能创建该文件"，
+// 目标文件确实没建；但工作区里多了 `.qoder-credits/report.json` 和一个 canvas 文件——
+// 那是它自己的运行痕迹。当时我判成了"有交付"，这是我这把尺子造的第二个假绿。
+dir = tmp();
+fs.mkdirSync(path.join(dir, '.qoder-credits'), { recursive: true });
+fs.writeFileSync(path.join(dir, '.qoder-credits', 'report.json'), '{"tokens":123}\n');
+fs.writeFileSync(path.join(dir, '.gitignore'), 'ignore me\n');
+const beforeDots = delivery.snapshotDir(dir);
+fs.mkdirSync(path.join(dir, 'out'), { recursive: true });
+fs.writeFileSync(path.join(dir, 'out', 'x.md'), 'real\n');
+// 起跑后成员自己往点目录里写运行痕迹：这条必须是"新增"被跳掉，而不是两边都有所以看不见
+fs.writeFileSync(path.join(dir, '.qoder-credits', 'late-trace.json'), '{"written_after_start":true}\n');
+let dotDiff = delivery.diff(beforeDots, delivery.snapshotDir(dir));
+check('成员自己的点目录（.qoder-credits 这类）不计进交付', !JSON.stringify(dotDiff).includes('late-trace') && !JSON.stringify(dotDiff).includes('.qoder-credits'), JSON.stringify(dotDiff));
+check('但顶层点文件照常算（.gitignore 就是真产出）', dotDiff.added.some(x => x.path === 'out/x.md') && beforeDots.files.some(f => f.path === '.gitignore'), JSON.stringify(beforeDots.files.map(f => f.path)));
+
+s = delivery.summarize({
+  status: 'done',
+  output: '5 warnings loading skill configs.\n需要您授权写入权限才能创建该文件。\n',
+  diff: { added: [], modified: [], deleted: [] }, partial: false
+});
+check('它明说"需要授权"且盘上没有真产出 → 判 blocked_by_permission，不是 produced', s.verdict === 'blocked_by_permission', JSON.stringify(s));
+check('判词要点名是权限档拦住的，并给出去哪一档开', /权限/.test(s.reason) && /设置|档|mode/.test(s.next), s.reason + ' | ' + s.next);
+s = delivery.summarize({
+  status: 'done',
+  output: '过程中有些操作需要授权，我改用了只读方式，最后写好了 report.md。',
+  diff: { added: [{ path: 'report.md', size: 900 }], modified: [], deleted: [] }, partial: false
+});
+check('盘上真有产出时，正文里出现"授权"二字不误判成被拦', s.verdict === 'produced', JSON.stringify(s));
+s = delivery.summarize({ status: 'done', output: 'This error message mentions permission denied in passing.', diff: { added: [], modified: [], deleted: [] }, partial: false });
+check('英文散文里顺带提到 permission 不误判（要像一句拒绝，而不是在讲这个词）', s.verdict === 'talked_only', JSON.stringify(s));
+
+console.log(`\n交付闭环断言：${oks.length} 通过 / ${fails.length} 失败`);
   for (const f of fails) console.log('  FAIL ' + f);
   if (fails.length) { console.log('DELIVERY_CHECKS_FAILED'); process.exit(1); }
   console.log('ALL_DELIVERY_CHECKS_OK');

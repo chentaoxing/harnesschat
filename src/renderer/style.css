@@ -346,3 +346,6 @@ body { font-family: "Microsoft YaHei", "Segoe UI", sans-serif; font-size: 14px; 
 .dv-reason, .dv-next { font-size: 11.5px; color: #4b5563; margin-top: 4px; }
 .dv-next { color: #1f2937; }
 .dv-cwd { font-size: 11px; color: #9ca3af; margin-top: 3px; }
+
+.task-delivery.blocked_by_permission { background: #f2f6fd; border-left-color: #2f6fd0; }
+.blocked_by_permission .dv-verdict { background: #e2ecfb; color: #1f4fa5; }

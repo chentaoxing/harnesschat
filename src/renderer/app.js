@@ -94,7 +94,7 @@ function deliveryHTML(t) {
   const d = t.delivery;
   if (!d) return '';
   const cls = d.verdict || 'unknown';
-  const label = { produced: '有交付', talked_only: '只动了嘴', failed: '没跑成', unknown: '未称出' }[d.verdict] || d.verdict;
+  const label = { produced: '有交付', talked_only: '只动了嘴', blocked_by_permission: '被权限档拦住', failed: '没跑成', unknown: '未称出' }[d.verdict] || d.verdict;
   const arts = (d.artifacts || []).slice(0, 6).map(a =>
     `<span class="dv-art" title="${esc(String(a.size || 0) + ' 字节')}">${esc(a.what || '')} ${esc(a.path)}</span>`).join('');
   const more = (d.artifacts || []).length > 6 ? `<span class="dv-more">还有 ${(d.artifacts || []).length - 6} 个</span>` : '';
