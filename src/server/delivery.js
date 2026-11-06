@@ -137,7 +137,7 @@ const MAX_ARTIFACTS = 30;
 // 明确拒绝写盘的说法。**必须出现在行首**（可带 [error]: 之类前缀）：
 // 拒绝就是整行在拒绝，散文里顺带出现 "permission denied" 不算——
 // 实测那条英文反例 "This error message mentions permission denied in passing." 就是靠这条锚点排除的。
-const REFUSAL = /(?:^|\n)[\s>\-*]*(?:\(?error\)?[:：]\s*)?(?:需要.{0,8}授权|请授权|无法(?:写入|修改|创建)|没有(?:写入|修改)权限|permission (?:to (?:edit|write|create)|denied)|not (?:authorized|permitted)|i ?cannot (?:write|create|edit))/i;
+const REFUSAL = /(?:^|\n)[\s>\-*]*(?:\(?error\)?[:：]\s*)?(?:需(?:要|求).{0,10}(?:授权|批准|许可)|等待?.{0,8}(?:权限|授权|批准)|请(?:给予|提供)?.{0,6}(?:授权|批准|许可)|(?:授权|批准|许可)(?:才能|后才|来|之后)|无法(?:写入|修改|创建|编辑)|没有(?:写入|修改|编辑)权限|permission (?:to (?:edit|write|create)|denied|required)|awaiting (?:your )?(?:permission|approval)|not (?:authorized|permitted)|i ?cannot (?:write|create|edit)|i need (?:your )?(?:permission|approval))/i;
 
 /**
  * 把两层证据合成一句人话 + 一句有据可查的下一步。

@@ -203,6 +203,11 @@ s = delivery.summarize({
   diff: { added: [], modified: [], deleted: [] }, partial: false
 });
 check('它明说"需要授权"且盘上没有真产出 → 判 blocked_by_permission，不是 produced', s.verdict === 'blocked_by_permission', JSON.stringify(s));
+// 2026-11-07 第二次真机跑出来的另一种措辞：同一件事，它说"等待您的权限批准来创建该文件"
+s = delivery.summarize({ status: 'done', output: '5 warnings loading skill configs.\n等待您的权限批准来创建该文件。\n', diff: { added: [], modified: [], deleted: [] }, partial: false });
+check('换个说法的拒绝（"等待您的权限批准来创建"）也要认出来', s.verdict === 'blocked_by_permission', JSON.stringify(s));
+s = delivery.summarize({ status: 'done', output: '5 warnings loading skill configs. Use /skills to see details.\n需要您授权写入权限才能创建该文件。\n', diff: { added: [], modified: [], deleted: [] }, partial: false });
+check('第一次真机那种措辞同样认得出', s.verdict === 'blocked_by_permission', s.verdict);
 check('判词要点名是权限档拦住的，并给出去哪一档开', /权限/.test(s.reason) && /设置|档|mode/.test(s.next), s.reason + ' | ' + s.next);
 s = delivery.summarize({
   status: 'done',
