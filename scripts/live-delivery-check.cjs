@@ -24,8 +24,13 @@ const B = 'http://127.0.0.1:18790';
   console.log('VERDICT=' + (dv && dv.verdict));
   console.log('HEADLINE=' + (dv && dv.headline));
   console.log('ARTIFACTS=' + JSON.stringify((dv && dv.artifacts) || []));
-  console.log('FILE_ON_DISK=' + fs.existsSync(path.join(st.workspace, marker)));
+  const exists = fs.existsSync(path.join(st.workspace, marker));
+  console.log('FILE_ON_DISK=' + exists);
   const leaked = JSON.stringify(dv || {}).includes('qoder-credits');
   console.log('TOOL_INTERNAL_LEAKED=' + leaked);
-  console.log(!leaked && (dv && (dv.verdict === 'blocked_by_permission' || dv.verdict === 'produced')) ? 'DELIVERY_UAT2_OK' : 'DELIVERY_UAT2_BAD');
+  // 两种都算自洽：真建了文件→produced；被权限档拦住→blocked_by_permission。
+  // 不自洽的是"它没建成而我说有交付"（0.7.0 就是这个假绿）。
+  const ok = dv && (dv.verdict === 'produced' ? exists : dv.verdict === 'blocked_by_permission');
+  console.log('VERDICT_SELF_CONSISTENT=' + (ok ? 'yes' : 'no'));
+  console.log(ok && !leaked ? 'DELIVERY_UAT2_OK' : 'DELIVERY_UAT2_BAD');
 })().catch(e => console.log('ERR ' + e.message));
