@@ -134,10 +134,14 @@ function gitInfo(dir) {
 
 const MAX_ARTIFACTS = 30;
 
-// 明确拒绝写盘的说法。**必须出现在行首**（可带 [error]: 之类前缀）：
-// 拒绝就是整行在拒绝，散文里顺带出现 "permission denied" 不算——
-// 实测那条英文反例 "This error message mentions permission denied in passing." 就是靠这条锚点排除的。
-const REFUSAL = /(?:^|\n)[\s>\-*]*(?:\(?error\)?[:：]\s*)?(?:需(?:要|求).{0,10}(?:授权|批准|许可)|等待?.{0,8}(?:权限|授权|批准)|请(?:给予|提供)?.{0,6}(?:授权|批准|许可)|(?:授权|批准|许可)(?:才能|后才|来|之后)|无法(?:写入|修改|创建|编辑)|没有(?:写入|修改|编辑)权限|permission (?:to (?:edit|write|create)|denied|required)|awaiting (?:your )?(?:permission|approval)|not (?:authorized|permitted)|i ?cannot (?:write|create|edit)|i need (?:your )?(?:permission|approval))/i;
+// 拒绝写盘的信号。2026-11-07 一晚上被同一件事的三种措辞打过：
+//   「需要您授权写入权限才能创建该文件」/「等待您的权限批准来创建该文件」/
+//   「写入被权限阻止，需要确认是否允许写入该路径」——短语枚举必然一直漏，
+//   因为这句话是模型自由生成的。所以判据改成结构性的：
+//   **零变化 + 正文里出现权限类词**，并且判词只说"可能"，把依据词带出来，不装作确定。
+//   误判代价很低：blocked_by_permission 与 talked_only 都说"这一单没交付东西"，
+//   区别只在于要不要顺手给去路。
+const PERMISSION_WORDS = /(权限|授权|批准|许可|允许|permission|approval|authorize|denied)/i;
 
 /**
  * 把两层证据合成一句人话 + 一句有据可查的下一步。
@@ -163,11 +167,11 @@ function summarize(ev) {
     };
   }
   if (n === 0 && !grew) {
-    if (REFUSAL.test(String(ev.output || ''))) {
+    if (PERMISSION_WORDS.test(String(ev.output || ''))) {
       return {
         verdict: 'blocked_by_permission', changed: 0, partial: !!d.partial, artifacts: [],
-        headline: '文件没变化（0 个）· 它明说了要授权',
-        reason: '这一扇门的权限档拦住了写盘：它回的是"需要授权才能创建/修改"，不是做完了。无头模式没有审批通道，保守档就是这个表现。',
+        headline: '文件没变化（0 个）· 正文提到权限',
+        reason: '可能是被权限档拦住了（这一单零变化，而它的回答里出现了权限/授权类的词）。无头模式没有审批通道，保守档就是这个表现。如果你本来就只想要一个回答，这条可以忽略。',
         next: '要它真动手：设置里给这扇门切到 acceptEdits/auto-edit 一档（风险自担），或者把任务改成只读产出（只回答、不写文件）。'
       };
     }

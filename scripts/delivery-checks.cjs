@@ -208,7 +208,18 @@ s = delivery.summarize({ status: 'done', output: '5 warnings loading skill confi
 check('换个说法的拒绝（"等待您的权限批准来创建"）也要认出来', s.verdict === 'blocked_by_permission', JSON.stringify(s));
 s = delivery.summarize({ status: 'done', output: '5 warnings loading skill configs. Use /skills to see details.\n需要您授权写入权限才能创建该文件。\n', diff: { added: [], modified: [], deleted: [] }, partial: false });
 check('第一次真机那种措辞同样认得出', s.verdict === 'blocked_by_permission', s.verdict);
-check('判词要点名是权限档拦住的，并给出去哪一档开', /权限/.test(s.reason) && /设置|档|mode/.test(s.next), s.reason + ' | ' + s.next);
+// 2026-11-07 第三次真机：又换了说法——"写入被权限阻止，需要确认是否允许写入该路径"。
+// 结论：拒绝的话是模型自由生成的，短语枚举必然一直漏。改成"零变化 + 正文里出现权限类词"，
+// 并且判词只说"可能是被权限档拦住"，把依据词带出来，不装作确定。
+s = delivery.summarize({ status: 'done', output: '写入被权限阻止，需要确认是否允许写入该路径。', diff: { added: [], modified: [], deleted: [] }, partial: false });
+check('第四次换措辞也不用再补枚举（改成结构性判据：零变化 + 提到权限类词）', s.verdict === 'blocked_by_permission', s.verdict);
+check('判词不许装作确定，要带"可能"并给出依据词', /可能/.test(s.reason) && /(权限|授权|批准|许可|permission|approval)/.test(s.reason), s.reason);
+s = delivery.summarize({ status: 'done', output: '已完成，报告在 out/report.md。', diff: { added: [], modified: [], deleted: [] }, partial: false });
+check('正文完全没提权限时仍判"只动了嘴"', s.verdict === 'talked_only', s.verdict);
+s = delivery.summarize({ status: 'done', output: '这里有权限相关的说明文字，仅供参考。', diff: { added: [{ path: 'doc.md', size: 100 }], modified: [], deleted: [] }, partial: false });
+check('盘上有产出时，正文提不提权限都算有交付', s.verdict === 'produced', s.verdict);
+const blockedSample = delivery.summarize({ status: 'done', output: '写入被权限阻止，需要确认是否允许写入该路径。', diff: { added: [], modified: [], deleted: [] }, partial: false });
+check('判词要点名权限档，并给出去哪一档开', /权限/.test(blockedSample.reason) && /设置|档|mode/.test(blockedSample.next), blockedSample.reason + ' | ' + blockedSample.next);
 s = delivery.summarize({
   status: 'done',
   output: '过程中有些操作需要授权，我改用了只读方式，最后写好了 report.md。',
@@ -216,7 +227,7 @@ s = delivery.summarize({
 });
 check('盘上真有产出时，正文里出现"授权"二字不误判成被拦', s.verdict === 'produced', JSON.stringify(s));
 s = delivery.summarize({ status: 'done', output: 'This error message mentions permission denied in passing.', diff: { added: [], modified: [], deleted: [] }, partial: false });
-check('英文散文里顺带提到 permission 不误判（要像一句拒绝，而不是在讲这个词）', s.verdict === 'talked_only', JSON.stringify(s));
+check('英文顺带提到 permission denied 且零变化：也归到"可能被权限拦住"（两个候选都说没交付，只是给不给去路的差别）', s.verdict === 'blocked_by_permission', s.verdict);
 
 console.log(`\n交付闭环断言：${oks.length} 通过 / ${fails.length} 失败`);
   for (const f of fails) console.log('  FAIL ' + f);
