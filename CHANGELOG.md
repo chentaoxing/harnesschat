@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.0 (2026-11-07)
+
+门体检进产品。起因是一次全机实测：11 扇门里**只有 1 扇真的调用过文件工具**，其余要么卡 key，要么答得漂亮但一次工具没用。账本能告诉你"成功/失败"，回答不了"这扇门到底能不能替我把一段活干完"——而接下来要做的自动选人必须建立在这个答案上。
+
+- **侧栏新增「🩺 门体检」**（`src/server/health.js` + `runHealthCheck`）：逐扇派一次只读探针，判据是它能不能把**现造的随机 canary 文件名**独立成行回出来。答得出来 = `能干完活`；跑完了但没回出来 = `只会聊天`（不进选人池）；失败 = 红并带归因层。模型猜不出那个随机名字，所以这不是"它说它会"，是可反驳的证据。
+- **探针禁止自己造文件**：提示词明写"不得创建/修改/删除/重命名任何文件，包括不许新建一个文件来配合这次检查"，并且没有可用工具时只准回 `NO_TOOL`。同时 canary 必须**独立成行**才算命中——"我会创建 CANARY-x.txt 给你"这种句子判 chatter，不判 green。
+- **体检不污染群转录**：`runTask` 增加 quiet 通道（不 push 卡片、不广播 delta、不落转录），结果只写 `health.jsonl`。否则每天 11 张探针卡片会把群刷成日志。这一单仍然记账本，但任务类型记成 `health`，**不混进五类路由样本**。
+- **绿门池 `greenDoors(now, maxAgeHours, usage)`**：最后一次体检是绿、且在 24 小时内、且此刻不在限流冷却，才进池。过绿不等于现在绿（key 会过期、上游会下线）。这是第 ③ 步自动选人的候选池接口。
+- **自动体检默认关**：每次全机体检都真花额度，这个开关归陈韬行；打开后可设间隔，**下限 6 小时**（不许配成每 1 分钟刷额度），并且只在没有活人在派单时才插队跑。
+- **失败分层补两类**（都来自本轮实测原文）：`not logged in / please run /login` → `auth`；`npm error / ETARGET / notarget / Cannot find module / MODULE_NOT_FOUND` → 新层 `launch`（"CLI 本体起不来"和"这台机器没装"是两件事，都发生在模型之前，也都**不进冷却**）。`launch` 判定放在 `not_found` 之前，否则 `MODULE_NOT_FOUND` 会被裸 `NOT_FOUND` 抢走。
+- 实测记录（本机 11 扇）：`qoderclicn` 44s **green**（canary 命中）；`zcode`/`gemini`/`hermes`/`codebuddy`/`dsh`/`qwenwork` 红在 `auth`；`claude` 红在未登录；`cline` 红在 `launch`（`npx cline` 撞 `ETARGET: @ai-sdk/gateway@4.0.137` 不存在）；`codex` 等满超时红在 `timeout`；`minimax` 未检测到。
+- 断言 196 → **232 项**（新增 `scripts/health-checks.cjs` 29 项，含"假读卡器/假吹牛"两扇自定义成员走真服务端端到端；`usage-checks` 52→59）。UI 验证脚本 `scripts/ui-health-check.cjs`。
+
+
 ## 0.5.3 (2026-11-07)
 
 把本机 17 家 harness 全部盘了一遍，接入实测真有无头入口的两家：**DeepSeek Harness（dsh）** 和 **QwenWork 内嵌的 Qwen Code（阿里办公）**。顺带修掉一个凭证守卫的真漏洞。

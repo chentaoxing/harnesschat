@@ -311,3 +311,19 @@ body { font-family: "Microsoft YaHei", "Segoe UI", sans-serif; font-size: 14px; 
 .u-sect { font-size: 11px; color: #6b7280; margin: 12px 0 4px; border-top: 1px dashed #e3e6ea; padding-top: 8px; }
 .u-row2 { font-size: 12px; color: #374151; padding: 2px 0; }
 .u-row2.dim { color: #9ca3af; }
+
+/* 门体检面板 */
+#health { width: min(760px, 92vw); }
+.health-row { padding: 10px 12px; border: 1px solid #e6e8ee; border-radius: 10px; margin-bottom: 8px; }
+.health-row.green { border-color: #b7e4c4; background: #f4fcf6; }
+.health-row.chatter { border-color: #ffe1a8; background: #fffaf0; }
+.health-row.red { border-color: #f3c1c1; background: #fdf5f5; }
+.health-row.none { border-style: dashed; color: #9ca3af; }
+.h-level { font-size: 11px; padding: 1px 8px; border-radius: 10px; background: #eef1f5; color: #4b5563; }
+.h-level.green { background: #e2f6e8; color: #1f7a3d; }
+.h-level.chatter { background: #fff2d9; color: #a06a12; }
+.h-level.red { background: #fde3e3; color: #b3261e; }
+.h-green-mark { font-size: 11px; color: #1f7a3d; margin-left: 6px; }
+.h-why { font-size: 12px; color: #374151; margin-top: 4px; }
+.h-meta { font-size: 11px; color: #9ca3af; margin-top: 2px; }
+.health-note { font-size: 12px; color: #6b7280; background: #f7f8fa; border-radius: 8px; padding: 8px 10px; margin: 8px 0 10px; }

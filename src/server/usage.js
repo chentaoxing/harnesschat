@@ -38,8 +38,11 @@ function classifyError(ev) {
   const full = String(ev.output || ev.errorKind || '');
   const head = full.slice(0, HEADLINE_CHARS);
   if (/expired|coding plan|subscription|套餐/i.test(head)) return 'expired';
-  if (/expired|coding plan|subscription|套餐/i.test(head)) return 'expired';
-  if (/invalid token|token is required|unauthorized|authentication failed|api.?key|missing key|missing_credential|no auth type|authentication required/i.test(head)) return 'auth';
+  if (/invalid token|token is required|unauthorized|authentication failed|api.?key|missing key|missing_credential|no auth type|authentication required|not logged in|please run \/login/i.test(head)) return 'auth';
+  // "起不来"和"没装"是两件事，而且都发生在模型之前：CLI 本体拉不起来（npm 拉不到包、
+  // 入口模块没落地）归 launch；只有"这台机器上找不到这个应用"才是 not_found。
+  // 顺序上 launch 必须在 not_found 之前，否则 MODULE_NOT_FOUND 会被裸 NOT_FOUND 抢走。
+  if (/npm error|etarget|notarget|cannot find module|err_module_not_found|module_not_found|command not found|不是内部或外部命令|enoent.*spawn/i.test(head)) return 'launch';
   if (/NOT_FOUND|未检测到|无法定位/i.test(head)) return 'not_found';
   if (/timeout|timed out|ETIMEDOUT|超时|没有新数据/i.test(head)) return 'timeout';
   // 限流放在网关之前：真撞过额度时，绝不能因为消息里顺带出现 upstream 字样

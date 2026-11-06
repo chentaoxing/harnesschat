@@ -17,6 +17,7 @@
     <div class="sidebar-foot">
       <button id="btn-sessions" class="ghost-btn">🛰 外部会话 Sessions <span id="sessions-badge" class="badge hidden"></span></button>
       <button id="btn-usage" class="ghost-btn">📊 用量 Usage <span id="usage-badge" class="badge hidden"></span></button>
+      <button id="btn-health" class="ghost-btn">🩺 门体检 Health <span id="health-badge" class="badge hidden"></span></button>
       <button id="btn-settings" class="ghost-btn">⚙ 设置 Settings</button>
     </div>
   </aside>
@@ -73,6 +74,23 @@
     <div id="usage-list"></div>
     <div class="set-actions">
       <button id="btn-usage-close" class="ghost-btn">关闭 Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="health-mask" class="hidden">
+  <div id="health">
+    <h3>门体检 <span class="sm-hint">每扇门最后一次「到底能不能干活」的结论</span></h3>
+    <div class="sess-toolbar">
+      <button id="btn-health-run" class="chip">立刻体检全部</button>
+      <button id="btn-health-refresh" class="chip">刷新</button>
+      <label class="chip"><input type="checkbox" id="health-auto"> 每天自动体检</label>
+      <span id="health-status" class="sm-hint"></span>
+    </div>
+    <div class="health-note">判据不是「它回话了」，而是它能不能把我们现造的随机文件名读出来——答得再漂亮，没回出文件名只算「会聊天」，不进自动选人池。</div>
+    <div id="health-list"></div>
+    <div class="set-actions">
+      <button id="btn-health-close" class="ghost-btn">关闭 Close</button>
     </div>
   </div>
 </div>

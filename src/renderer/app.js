@@ -301,6 +301,11 @@ let usageRows = [];
 let usageTerminal = [];
 let usageCoverage = [];
 let usageTruncated = false;
+let healthRows = [];
+let healthGreen = [];
+let healthAuto = false;
+let healthEvery = 24;
+let healthPoll = null;
 let usageTimer = null;
 
 function renderUsage() {
@@ -400,6 +405,91 @@ $('#btn-usage').addEventListener('click', () => {
   renderUsage();
   loadUsage(false);
   if (!usageTimer) usageTimer = setInterval(() => { if (!$('#usage-mask').classList.contains('hidden')) loadUsage(false); }, 60000);
+});
+
+// ---------- 门体检 ----------
+const HEALTH_LABEL = { green: '能干完活', chatter: '只会聊天', red: '红', pending: '待跑' };
+
+function ago(ts) {
+  const m = Math.max(0, Math.round((Date.now() - ts) / 60000));
+  if (m < 60) return m + ' 分钟前';
+  if (m < 60 * 24) return Math.round(m / 60) + ' 小时前';
+  return Math.round(m / 1440) + ' 天前';
+}
+
+function renderHealth() {
+  const box = $('#health-list');
+  if (!box) return;
+  box.innerHTML = '';
+  const byId = {};
+  for (const r of healthRows) byId[r.memberId] = r;
+  for (const m of state.members || []) {
+    const r = byId[m.id];
+    const div = document.createElement('div');
+    div.className = 'health-row ' + (r ? r.level : 'none');
+    div.innerHTML = `
+      <div class="u-head">
+        <b>${esc(m.name)}</b>
+        <span class="h-level ${r ? r.level : 'none'}">${r ? (HEALTH_LABEL[r.level] || r.level) : '没体检过'}</span>
+        ${r && r.level === 'green' ? '<span class="h-green-mark">在选人池里</span>' : ''}
+      </div>
+      <div class="h-why">${r ? esc(r.reason || (r.layer || '') + '') : '跑一次体检才知道这扇门能不能替你干活'}</div>
+      <div class="h-meta">${r ? ago(r.at) + ' · ' + Math.round((r.ms || 0) / 1000) + 's' : ''}</div>`;
+    box.appendChild(div);
+  }
+  const st = $('#health-status');
+  if (st) st.textContent = `${healthGreen.length} 扇绿 / ${(state.members || []).length} 扇 · 自动体检${healthAuto ? '开，每 ' + healthEvery + ' 小时' : '关（每次都要花你的额度，默认不替你开）'}`;
+  const cb = $('#health-auto');
+  if (cb) cb.checked = !!healthAuto;
+  const badge = $('#health-badge');
+  if (badge) { badge.textContent = healthGreen.length ? '' : '!'; badge.classList.toggle('hidden', healthGreen.length > 0); }
+}
+
+async function loadHealth() {
+  try {
+    const d = await (await fetch(BASE + '/api/health', { headers: authHeaders() })).json();
+    healthRows = d.rows || [];
+    healthGreen = d.green || [];
+    healthAuto = !!d.auto;
+    healthEvery = d.everyHours || 24;
+    renderHealth();
+  } catch (e) {
+    const st = $('#health-status');
+    if (st) st.textContent = '读取失败: ' + String((e && e.message) || e);
+  }
+}
+
+async function runHealthAll() {
+  try {
+    await fetch(BASE + '/api/health/run', { method: 'POST', headers: authHeaders(), body: '{}' });
+    const st = $('#health-status');
+    if (st) st.textContent = '体检在跑：逐扇一次只读探针，慢门（比如要先装依赖的）会多等一会儿…';
+    if (healthPoll) clearInterval(healthPoll);
+    healthPoll = setInterval(async () => {
+      await loadHealth();
+      const running = healthRows.some(r => r.level === 'pending');
+      if (!running && Date.now() - (healthRows[0] ? healthRows[0].at : 0) < 90000 && healthRows.length) { clearInterval(healthPoll); healthPoll = null; }
+    }, 8000);
+  } catch (e) { /* 状态行已经给了 */ }
+}
+
+$('#btn-health').addEventListener('click', () => {
+  $('#health-mask').classList.remove('hidden');
+  loadHealth();
+});
+$('#btn-health-close').addEventListener('click', () => $('#health-mask').classList.add('hidden'));
+$('#btn-health-refresh').addEventListener('click', () => loadHealth());
+$('#btn-health-run').addEventListener('click', () => runHealthAll());
+$('#health-auto').addEventListener('change', async ev => {
+  const on = ev.target.checked;
+  try {
+    await fetch(BASE + '/api/settings', {
+      method: 'POST', headers: authHeaders(),
+      body: JSON.stringify({ health: { auto: on, everyHours: healthEvery } })
+    });
+    healthAuto = on;
+    renderHealth();
+  } catch (e) { ev.target.checked = !on; }
 });
 $('#btn-usage-close').addEventListener('click', () => {
   $('#usage-mask').classList.add('hidden');

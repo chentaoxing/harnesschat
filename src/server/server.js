@@ -16,12 +16,16 @@ const { Store } = require('./store');
 const { listSessions } = require('./sessions');
 const usage = require('./usage');
 const terminalUsage = require('./terminal-usage');
+const health = require('./health');
 const { assertNoForeignCredentials } = require('./guard');
 
 const ANSI_RE = /[\u001b\u009b][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[-a-zA-Z\d/#&.:=?%@~_]*)*)?\u0007)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-ntqry=><~]))/g;
 const stripAnsi = (s) => s.replace(ANSI_RE, '');
 
 function id() { return crypto.randomBytes(6).toString('hex'); }
+
+// 体检等一扇门的封顶时间：比成员自己的超时短，但要够慢门（hermes 装依赖实测 138s）跑完
+const HEALTH_WAIT_MS = 4 * 60 * 1000;
 
 /**
  * 子进程环境变量白名单。
@@ -94,6 +98,7 @@ class GroupServer {
 
     this.messages = this.store.loadMessages();
     usage.init(this.dataDir);   // 用量账本与转录同目录，重启后从盘上重算
+    health.init(this.dataDir);  // 门体检结果同理
     this.wsClients = new Set();
     this.running = new Map(); // taskId -> child
 
@@ -109,6 +114,7 @@ class GroupServer {
 
   listen() {
     this.reconcileInterruptedTasks();
+    this.scheduleHealth(); // 默认关；他在设置里开了才排定时器
     return new Promise(resolve => this.server.listen(this.port, '127.0.0.1', resolve));
   }
 
@@ -160,6 +166,27 @@ class GroupServer {
     const url = new URL(req.url, 'http://127.0.0.1');
     if (url.pathname.startsWith('/api/') && !this.authed(req)) {
       return json(401, { error: 'unauthorized' });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/health') {
+      // 门体检：每扇门最后一次"到底能不能干活"的结论
+      return json(200, {
+        now: Date.now(),
+        rows: health.latest(Date.now()),
+        green: health.greenDoors(Date.now(), 24, usage),
+        auto: health.autoEnabled(this.config),
+        everyHours: health.everyHours(this.config)
+      });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/health/run') {
+      let body = '';
+      req.on('data', c => { body += c; if (body.length > 64 * 1024) req.destroy(); });
+      req.on('end', () => {
+        let ids = null;
+        try { const j = JSON.parse(body || '{}'); if (Array.isArray(j.memberIds)) ids = j.memberIds.filter(x => typeof x === 'string'); } catch (e) { /* 空 body = 全部门 */ }
+        this.runHealthCheck(ids).catch(() => {});
+        return json(202, { started: true, note: '体检在跑：每扇门一次只读探针，结果逐扇落盘' });
+      });
+      return;
     }
     if (req.method === 'GET' && url.pathname === '/api/usage') {
       // 用量账本：哪家今天用了多少、成功失败分类、是否在限流冷却里、免费档的结论从哪来；
@@ -243,6 +270,11 @@ class GroupServer {
           }
           if (Array.isArray(s.membersCustom)) {
             this.config.membersCustom = s.membersCustom.filter(cm => cm && cm.name && cm.program);
+          }
+          // 自动体检：默认关；开了才排定时器，改完立刻重排
+          if (s.health && typeof s.health === 'object') {
+            this.config.health = { auto: s.health.auto === true, everyHours: Number(s.health.everyHours) || 24 };
+            this.scheduleHealth();
           }
           // 重载成员表
           this.members = MEMBERS.map(m => {
@@ -342,14 +374,15 @@ class GroupServer {
     }
   }
 
-  runTask(member, prompt, threadId, modelOverride, cwdOverride, taskKindOverride) {
+  runTask(member, prompt, threadId, modelOverride, cwdOverride, taskKindOverride, opts) {
+    const quiet = !!(opts && opts.quiet);
     const model = modelOverride || member.defaultModel || '';
     const workDir = GroupServer.resolveWorkDir(cwdOverride, this.config.workspace);
     const taskKind = String(taskKindOverride || 'unclassified');
     const task = {
       id: id(), type: 'task', threadId, memberId: member.id, memberName: member.name,
       color: member.color, prompt, text: '', status: 'running', at: Date.now(), model,
-      cwd: workDir, taskKind
+      cwd: workDir, taskKind, quiet: !!quiet
     };
 
     // 闸门：刚撞过限流的成员×模型先歇 30 分钟，别拿重试把配额打穿
@@ -357,11 +390,11 @@ class GroupServer {
     if (gate.blocked) {
       task.status = 'error';
       task.text = gate.reason + '（要立刻换一家，直接在群里 @ 别的成员）';
-      this.push(task);
+      if (!quiet) this.push(task);
       usage.record({ memberId: member.id, model, taskKind, status: 'blocked', ms: 0 });
       return task;
     }
-    this.push(task);
+    if (!quiet) this.push(task);
 
     const built = member.custom
       ? buildCustomSpawn(member, { prompt, model, cwd: workDir }, resolveCommand)
@@ -371,8 +404,7 @@ class GroupServer {
       task.text = built.error === 'NOT_FOUND'
         ? `未检测到 ${member.name}：请确认已安装并在 PATH 上，或在群设置里手动指定可执行文件路径`
         : built.error;
-      this.store.appendMessage({ type: 'task_status', taskId: task.id, status: 'error', at: Date.now() });
-      this.broadcast({ event: 'message', msg: { ...task } });
+      if (!quiet) { this.store.appendMessage({ type: 'task_status', taskId: task.id, status: 'error', at: Date.now() }); this.broadcast({ event: 'message', msg: { ...task } }); }
       return task;
     }
 
@@ -382,8 +414,7 @@ class GroupServer {
     } catch (e) {
       task.status = 'error';
       task.text = String((e && e.message) || e);
-      this.store.appendMessage({ type: 'task_status', taskId: task.id, status: 'error', at: Date.now() });
-      this.broadcast({ event: 'message', msg: { ...task } });
+      if (!quiet) { this.store.appendMessage({ type: 'task_status', taskId: task.id, status: 'error', at: Date.now() }); this.broadcast({ event: 'message', msg: { ...task } }); }
       usage.record({ memberId: member.id, model, taskKind, status: 'error', ms: Date.now() - task.at, errorKind: 'blocked by guard' });
       return task;
     }
@@ -398,8 +429,7 @@ class GroupServer {
     } catch (e) {
       task.status = 'error';
       task.text = '启动失败: ' + e.message;
-      this.store.appendMessage({ type: 'task_status', taskId: task.id, status: 'error', at: Date.now() });
-      this.broadcast({ event: 'message', msg: { ...task } });
+      if (!quiet) { this.store.appendMessage({ type: 'task_status', taskId: task.id, status: 'error', at: Date.now() }); this.broadcast({ event: 'message', msg: { ...task } }); }
       return task;
     }
     this.running.set(task.id, child);
@@ -417,8 +447,8 @@ class GroupServer {
       if (!pending) return;
       const delta = pending; pending = '';
       task.text += delta;
-      this.broadcast({ event: 'task_delta', taskId: task.id, text: delta });
-      this.store.appendMessage({ type: 'task_delta', taskId: task.id, text: delta, at: Date.now() });
+      if (!task.quiet) this.broadcast({ event: 'task_delta', taskId: task.id, text: delta });
+      if (!task.quiet) this.store.appendMessage({ type: 'task_delta', taskId: task.id, text: delta, at: Date.now() });
     };
     const onData = (buf) => {
       pending += stripAnsi(buf.toString('utf8'));
@@ -446,6 +476,50 @@ class GroupServer {
     return mode ? mode.args : [];
   }
 
+  /**
+   * 门体检：逐扇派一单"只许列目录"的任务，判据是它能不能把一次性工作区里
+   * 那个随机 canary 文件名回出来。跑完只写体检账，不进群转录——
+   * 否则每天 11 张探针卡片会把群刷成日志。
+   */
+  async runHealthCheck(memberIds) {
+    const targets = this.members.filter(m => (!memberIds || !memberIds.length || memberIds.includes(m.id)));
+    const out = [];
+    for (const member of targets) {
+      // 探测口径要和真正派单的口径一致：自定义成员走 program 解析，内置成员走适配器
+      const reachable = member.custom ? !!resolveCommand(member.program) : !!resolveMemberProgram(member);
+      if (!reachable) {
+        const j = { memberId: member.id, level: 'red', layer: 'not_found', reason: '这台机器上没检测到它', ms: 0, canaryHit: false, at: Date.now() };
+        health.record(j); out.push(j); continue;
+      }
+      const canary = 'CANARY-' + crypto.randomBytes(6).toString('hex') + '.txt';
+      const probeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hc-probe-'));
+      try { fs.writeFileSync(path.join(probeDir, canary), 'probe marker\n', 'utf8'); } catch (e) { /* 造不出标记就跳过这扇 */ }
+      const task = this.runTask(member, health.probePrompt(), null, null, probeDir, 'health', { quiet: true });
+      const started = Date.now();
+      const budgetMs = Math.min((member.timeoutMin || 15) * 60 * 1000, HEALTH_WAIT_MS);
+      while (task.status === 'running' && Date.now() - started < budgetMs) await new Promise(r => setTimeout(r, 1500));
+      const judged = task.status === 'running'
+        ? { memberId: member.id, level: 'red', layer: 'timeout', reason: `体检等满 ${Math.round(budgetMs / 1000)} 秒还没回，按红处理`, ms: Date.now() - started, canaryHit: false, at: Date.now() }
+        : health.judge({ memberId: member.id, status: task.status, output: task.text, canary, ms: Date.now() - started, at: Date.now() });
+      health.record(judged);
+      out.push(judged);
+      try { fs.rmSync(probeDir, { recursive: true, force: true }); } catch (e) { /* 临时目录让系统清 */ }
+    }
+    this.broadcast({ event: 'health_updated', rows: health.latest(Date.now()) });
+    return out;
+  }
+
+  scheduleHealth() {
+    if (this.healthTimer) clearInterval(this.healthTimer);
+    if (!health.autoEnabled(this.config)) return;
+    const everyMs = health.everyHours(this.config) * 3600 * 1000;
+    this.healthTimer = setInterval(() => {
+      if (this.running.size) return; // 有活人在派单时不插队抢额度
+      this.runHealthCheck(null).catch(() => {});
+    }, everyMs);
+    if (this.healthTimer.unref) this.healthTimer.unref();
+  }
+
   finishTask(task, status, child, code) {
     if (!this.running.has(task.id)) return;
     this.running.delete(task.id);
@@ -465,8 +539,10 @@ class GroupServer {
     });
     // 这一笔同时会出现在那家的转录里：作废终端观测缓存，让面板下一眼就能看到新账
     terminalUsage.invalidate();
-    this.store.appendMessage({ type: 'task_status', taskId: task.id, status: finalStatus, code: code ?? null, at: Date.now() });
-    this.broadcast({ event: 'message', msg: { ...task } });
+    if (!task.quiet) {
+      this.store.appendMessage({ type: 'task_status', taskId: task.id, status: finalStatus, code: code ?? null, at: Date.now() });
+      this.broadcast({ event: 'message', msg: { ...task } });
+    }
   }
 }
 

@@ -196,6 +196,20 @@ evRow = usage.snapshot(NOW).rows.find(r => r.memberId === 'codebuddy');
 check('这种失败进账后结论不能再是"实测成功过"', (evRow && (evRow && evRow.freeEvidence || {}).verdict) === 'gateway-down', JSON.stringify(evRow && evRow.freeEvidence));
 check('这种失败计入 fail 而不是 ok', evRow && evRow.fail === 1 && evRow.ok === 0, evRow && JSON.stringify({ ok: evRow.ok, fail: evRow.fail }));
 
+// ---------- 12. 体检这轮实测出来的真实失败原文（逐条进尺子） ----------
+check('claude 的 "Not logged in · Please run /login" 归鉴权层', usage.classifyError({ status: 'error', output: 'Warning: no stdin data received in 3s, proceeding without it.\nNot logged in · Please run /login\n\n[进程退出码 1]' }) === 'auth');
+check('gemini 缺 auth 方法归鉴权层', usage.classifyError({ status: 'error', output: 'Please set an Auth method in your C:\\Users\\x\\.gemini\\settings.json or specify one of the following environment variables before running: GEMINI_API_KEY' }) === 'auth');
+check('npx 拉不到包（ETARGET/notarget）归"起不来"而不是鉴权', usage.classifyError({ status: 'error', output: 'npm warn exec The following package was not found and will be installed: cline@3.0.74\nnpm error code ETARGET\nnpm error notarget No matching version found for @ai-sdk/gateway@4.0.137.' }) === 'launch');
+check('npm error 形状也算起不来', usage.classifyError({ status: 'error', output: 'npm error code ENOENT syscall spawn node' }) === 'launch');
+check('MODULE_NOT_FOUND 也算起不来（入口没落地）', usage.classifyError({ status: 'error', output: 'Error: Cannot find module \'../dist/codebuddy-headless\'\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1)' }) === 'launch');
+check('"没检测到"这个原有含义不被 launch 抢走（NOT_FOUND 仍走 not_found）', usage.classifyError({ status: 'error', output: '未检测到该 CLI' }) === 'not_found');
+check('起不来和鉴权都不进冷却', (() => {
+  usage.init(fs.mkdtempSync(path.join(os.tmpdir(), 'hc-rl-')));
+  usage.record({ memberId: 'cline', model: 'x', status: 'error', ms: 6000, output: 'npm error code ETARGET notarget No matching version found', at: NOW });
+  usage.record({ memberId: 'claude', model: 'y', status: 'error', ms: 8000, output: 'Not logged in · Please run /login', at: NOW });
+  return usage.isBlocked('cline', 'x', NOW + 60000).blocked === false && usage.isBlocked('claude', 'y', NOW + 60000).blocked === false;
+})());
+
 // ---------- 结果 ----------
 console.log(`\n通过 ${oks.length} 项`);
 if (fails.length) {
