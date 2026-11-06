@@ -17,6 +17,7 @@ const { listSessions } = require('./sessions');
 const usage = require('./usage');
 const terminalUsage = require('./terminal-usage');
 const health = require('./health');
+const delivery = require('./delivery');
 const { assertNoForeignCredentials } = require('./guard');
 
 const ANSI_RE = /[\u001b\u009b][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[-a-zA-Z\d/#&.:=?%@~_]*)*)?\u0007)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-ntqry=><~]))/g;
@@ -423,6 +424,15 @@ class GroupServer {
     // 原因：这台机器上每个 harness 的 key 都可能在 process.env 里，而成员 CLI 一律靠
     // 自己的登录态/配置目录鉴权（~/.codex、~/.gemini、~/.zcode…），不需要也不该拿到别人的密钥。
     const env = childEnv(built.env || {}, this.config.envExtra);
+    // 交付闭环的"起跑前"证据：文件层快照 + git 状态，都在子进程动任何东西之前取。
+    // 只有真派单才取（体检探针是只读的，取它等于每天白扫两遍全工作区）。
+    if (delivery.shouldAttach(task)) {
+      try {
+        task._pre = { snap: delivery.snapshotDir(workDir), git: delivery.gitInfo(workDir) };
+      } catch (e) {
+        task._pre = { error: String((e && e.message) || e).slice(0, 120) };
+      }
+    }
     let child;
     try {
       child = safeExec(built.file, built.args, { cwd: workDir, env });
@@ -533,6 +543,26 @@ class GroupServer {
       task.text += '\n[判为失败：这段输出是错误行而不是结果]';
     }
     task.status = finalStatus;
+    // 交付结论：起跑前的快照 vs 现在的快照 + git 两侧对比，全部由我们称，不引用成员的自述。
+    if (delivery.shouldAttach(task) && task._pre && task._pre.snap) {
+      try {
+        const afterSnap = delivery.snapshotDir(task.cwd);
+        const afterGit = delivery.gitInfo(task.cwd);
+        const d = delivery.diff(task._pre.snap, afterSnap);
+        task.delivery = delivery.summarize({
+          status: finalStatus, output: task.text, diff: d,
+          gitBefore: task._pre.git, gitAfter: afterGit
+        });
+        task.delivery.cwd = task.cwd;
+      } catch (e) {
+        task.delivery = { verdict: 'unknown', headline: '交付差异没称出来', next: '扫描失败：' + String((e && e.message) || e).slice(0, 120), artifacts: [] };
+      }
+    }
+    delete task._pre;
+    // 交付结论单独落一条，重启后回放卡片时还能看见"当时到底交付了什么"
+    if (task.delivery && !task.quiet) {
+      this.store.appendMessage({ type: 'task_delivery', taskId: task.id, delivery: task.delivery, at: Date.now() });
+    }
     usage.record({
       memberId: task.memberId, model: task.model || '', taskKind: task.taskKind || 'unclassified',
       status: finalStatus, ms: Date.now() - task.at, output: task.text

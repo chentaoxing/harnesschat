@@ -327,3 +327,22 @@ body { font-family: "Microsoft YaHei", "Segoe UI", sans-serif; font-size: 14px; 
 .h-why { font-size: 12px; color: #374151; margin-top: 4px; }
 .h-meta { font-size: 11px; color: #9ca3af; margin-top: 2px; }
 .health-note { font-size: 12px; color: #6b7280; background: #f7f8fa; border-radius: 8px; padding: 8px 10px; margin: 8px 0 10px; }
+
+/* 交付闭环 */
+.task-delivery { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: #f7f8fa; border-left: 3px solid #c9ced8; }
+.task-delivery.produced { background: #f3fbf5; border-left-color: #2f9e50; }
+.task-delivery.talked_only { background: #fff8ec; border-left-color: #d98b0b; }
+.task-delivery.failed { background: #fdf4f4; border-left-color: #c0392b; }
+.dv-head { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.dv-verdict { font-size: 11px; padding: 1px 7px; border-radius: 9px; background: #e9edf3; color: #4b5563; }
+.produced .dv-verdict { background: #dff3e5; color: #1f7a3d; }
+.talked_only .dv-verdict { background: #fdeccc; color: #a06a12; }
+.failed .dv-verdict { background: #fbe0e0; color: #b3261e; }
+.dv-partial { font-size: 11px; color: #a06a12; }
+.dv-line { font-size: 12px; color: #374151; margin-top: 3px; }
+.dv-arts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
+.dv-art { font-size: 11px; background: #fff; border: 1px solid #e3e6ea; border-radius: 6px; padding: 1px 6px; font-family: ui-monospace, Consolas, monospace; }
+.dv-more { font-size: 11px; color: #9ca3af; }
+.dv-reason, .dv-next { font-size: 11.5px; color: #4b5563; margin-top: 4px; }
+.dv-next { color: #1f2937; }
+.dv-cwd { font-size: 11px; color: #9ca3af; margin-top: 3px; }

@@ -48,6 +48,11 @@ class Store {
         const t = [...out].reverse().find(x => x.type === 'task' && x.id === m.taskId);
         if (t) { t.status = m.status; t.code = m.code; continue; }
       }
+      if (m.type === 'task_delivery') {
+        // 交付结论折叠回卡片：重启后这张卡片仍然说得出"当时改了哪些文件"
+        const t = [...out].reverse().find(x => x.type === 'task' && x.id === m.taskId);
+        if (t) { t.delivery = m.delivery; continue; }
+      }
       out.push(m);
     }
     // 只保留结构化消息（user/task/system），数量截断

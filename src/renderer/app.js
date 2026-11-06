@@ -83,8 +83,30 @@ function taskCardHTML(t) {
     </div>
     <div class="task-prompt">${esc(t.prompt)}</div>
     <div class="task-out ${outEmpty ? 'empty' : ''}" data-role="out">${outEmpty ? '（等待输出…）' : esc(t.text)}</div>
+    ${deliveryHTML(t)}
     ${foot}
   `;
+}
+
+// 交付闭环：结论是我们从盘上称出来的，所以它排在成员自述的输出**后面**、脚注前面，
+// 一眼能看到"它说了什么"和"实际上变了什么"是否对得上。
+function deliveryHTML(t) {
+  const d = t.delivery;
+  if (!d) return '';
+  const cls = d.verdict || 'unknown';
+  const label = { produced: '有交付', talked_only: '只动了嘴', failed: '没跑成', unknown: '未称出' }[d.verdict] || d.verdict;
+  const arts = (d.artifacts || []).slice(0, 6).map(a =>
+    `<span class="dv-art" title="${esc(String(a.size || 0) + ' 字节')}">${esc(a.what || '')} ${esc(a.path)}</span>`).join('');
+  const more = (d.artifacts || []).length > 6 ? `<span class="dv-more">还有 ${(d.artifacts || []).length - 6} 个</span>` : '';
+  return `
+    <div class="task-delivery ${cls}">
+      <div class="dv-head"><b>交付</b><span class="dv-verdict">${esc(label)}</span>${d.partial ? '<span class="dv-partial">至少</span>' : ''}</div>
+      <div class="dv-line">${esc(d.headline || '')}</div>
+      ${arts || more ? `<div class="dv-arts">${arts}${more}</div>` : ''}
+      ${d.reason ? `<div class="dv-reason">${esc(d.reason)}</div>` : ''}
+      ${d.next ? `<div class="dv-next">${esc(d.next)}</div>` : ''}
+      ${d.cwd ? `<div class="dv-cwd" title="${esc(d.cwd)}">在 ${esc(d.cwd)}</div>` : ''}
+    </div>`;
 }
 
 function renderMessage(msg, { append = true } = {}) {
