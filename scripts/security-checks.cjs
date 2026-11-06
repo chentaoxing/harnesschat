@@ -90,6 +90,27 @@ let argvRejected = false;
 try { safeExec('node', ['ok', 123], {}); } catch (e) { argvRejected = true; }
 check('safeExec 拒绝非字符串 argv', argvRejected);
 
+// ---------- 4. 别家凭证路径不得进入 spawn ----------
+// 规则来自这次调研的边界：只用"那家自己的 CLI + 那家自己的登录"，绝不读别家存的凭据。
+// 所以守卫要拦的是：形如路径的字符串里出现了别家的凭证文件位置。
+const { assertNoForeignCredentials } = require('../src/server/guard');
+const throws = (fn) => { try { fn(); return false; } catch (e) { return true; } };
+
+check('env 里出现别家凭证路径被拦', throws(() => assertNoForeignCredentials('cline',
+  { args: [], env: { OPENAI_AUTH: 'C:\\Users\\x\\.codex\\auth.json' } })));
+check('argv 里出现别家凭证路径被拦', throws(() => assertNoForeignCredentials('zcode',
+  { args: ['--settings', 'C:\\Users\\x\\.workbuddy\\app\\connector-keys\\a.key'], env: {} })));
+check('成员用自家的 provider 配置不被误伤', !throws(() => assertNoForeignCredentials('zcode',
+  { args: [], env: { ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: 'C:\\Users\\x\\.zcode\\v2\\runtime\\provider\\windows-x86_64\\3.14.3\\endpoint-abc\\zcode-builtin.json', ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: 'C:\\Users\\x\\.zcode\\v2\\provider_config.json' } })));
+check('普通 prompt 文本里带 auth.json 字样不误伤', !throws(() => assertNoForeignCredentials('codex',
+  { args: ['-p', '帮我把 auth.json 的读取逻辑改掉'], env: {} })));
+check('自定义成员同样受保护', throws(() => assertNoForeignCredentials('mytool',
+  { args: ['--config', '/home/x/.claude/credentials.json'], env: {} })));
+check('群工作区路径不被误伤', !throws(() => assertNoForeignCredentials('codex',
+  { args: ['exec', '--cwd', 'C:\\Users\\x\\HarnessChat工作区'], env: {} })));
+check('成员引用自家的 auth.json 不被误伤', !throws(() => assertNoForeignCredentials('codex',
+  { args: ['--config', 'C:\\Users\\x\\.codex\\auth.json'], env: {} })));
+
 // ---------- 结果 ----------
 console.log(`\n通过 ${oks.length} 项：`);
 for (const o of oks) console.log('  ✓ ' + o);

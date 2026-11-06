@@ -264,6 +264,34 @@ body { font-family: "Microsoft YaHei", "Segoe UI", sans-serif; font-size: 14px; 
 }
 #btn-sessions { margin-bottom: 6px; }
 
+/* 用量账本 */
+#task-kind {
+  align-self: flex-end; width: 150px; border: 1px solid #d9d9d9; border-radius: 6px;
+  padding: 7px 8px; font: inherit; font-size: 12.5px; outline: none; color: #555; background: #fff;
+}
+#task-kind:focus { border-color: var(--accent); }
+#usage-mask {
+  position: fixed; inset: 0; background: rgba(0,0,0,.45);
+  display: flex; align-items: center; justify-content: center; z-index: 40;
+}
+#usage {
+  width: 700px; max-width: 92vw; max-height: 82vh; overflow: auto;
+  background: #fff; border-radius: 10px; padding: 18px 22px;
+}
+#usage h3 { margin: 0 0 10px; }
+.usage-row { border: 1px solid #eaeaea; border-left: 3px solid #cfcfcf; border-radius: 8px; padding: 9px 11px; margin-bottom: 8px; }
+.usage-row.cooling { border-left-color: #e6a23c; background: #fffaf2; }
+.u-head { display: flex; align-items: center; gap: 8px; }
+.u-model { font-size: 12px; color: var(--muted); font-family: Consolas, monospace; }
+.u-free { font-size: 11px; padding: 1px 8px; border-radius: 10px; background: #eafaef; color: #2f9e50; }
+.u-cool { font-size: 11px; padding: 1px 8px; border-radius: 10px; background: #fdf4e6; color: #b8791f; }
+.u-nums { font-size: 12.5px; margin-top: 4px; color: var(--text); }
+.u-kinds { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
+.u-kind, .u-task { font-size: 11.5px; padding: 1px 8px; border-radius: 10px; background: #f2f3f5; color: #555; }
+.u-kind.rate_limit { background: #fdf0e6; color: #b8500f; }
+.u-kind.auth, .u-kind.expired { background: #fdecec; color: #c23b3b; }
+.u-kind.not_found { background: #f0ecfd; color: #6a4bd0; }
+
 /* 更新横幅与关于行 */
 #update-banner {
   margin-left: auto; font-size: 12px; color: #e6a23c;

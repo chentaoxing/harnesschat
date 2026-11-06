@@ -180,6 +180,8 @@ async function send() {
   hideMention();
   const model = $('#model-input').value.trim();
   const payload = { text };
+  const kindSel = $('#task-kind');
+  if (kindSel && kindSel.value && kindSel.value !== 'unclassified') payload.taskKind = kindSel.value;
   if (model) payload.model = model;
   if (state.takeover) {
     // 接手：派到那条会话自己的工作区去，而不是群工作区
@@ -282,6 +284,81 @@ function updateComposerPlaceholder() {
     ? `续话模式：接着 ${state.continueThread.memberName} 的任务串继续说…`
     : '输入消息，@成员 派任务（如：@Codex 把 README 翻成英文）';
 }
+
+// ---------- 用量账本 ----------
+const KIND_LABEL = { rate_limit: '限流', auth: '鉴权', expired: '订阅到期', not_found: '没检测到', timeout: '超时', other: '其它' };
+let usageRows = [];
+let usageTimer = null;
+
+function renderUsage() {
+  const box = $('#usage-list');
+  if (!box) return;
+  box.innerHTML = '';
+  if (!usageRows.length) {
+    box.innerHTML = '<div class="sess-empty">还没有派单记录。派一单之后这里会按成员×模型累计：今天几次、成没成、失败卡在哪一层、是否在冷却。</div>';
+    return;
+  }
+  for (const r of usageRows) {
+    const div = document.createElement('div');
+    div.className = 'usage-row' + (r.blocked ? ' cooling' : '');
+    const kinds = Object.entries(r.byKind || {}).map(([k, n]) => `<span class="u-kind ${k}">${KIND_LABEL[k] || k} ${n}</span>`).join('');
+    const tasks = Object.entries(r.byTask || {}).map(([k, v]) => `<span class="u-task">${k} ${v.ok}/${v.ok + v.fail}</span>`).join('');
+    div.innerHTML = `
+      <div class="u-head">
+        <b>${esc(r.memberName)}</b>
+        <span class="u-model">${esc(r.model || '成员默认模型')}</span>
+        ${r.free ? '<span class="u-free">免费档</span>' : ''}
+        ${r.blocked ? '<span class="u-cool" data-until="' + r.cooldownUntil + '">冷却中</span>' : ''}
+      </div>
+      <div class="u-nums">
+        今天 <b>${r.today}</b> 次 · 累计 ${r.total} · 成 ${r.ok} / 败 ${r.fail}
+        ${r.medianMs ? ' · 中位 ' + Math.round(r.medianMs / 1000) + 's' : ''}
+      </div>
+      ${kinds ? `<div class="u-kinds">${kinds}</div>` : ''}
+      ${tasks ? `<div class="u-kinds">${tasks}</div>` : ''}`;
+    box.appendChild(div);
+  }
+  tickCooldowns();
+}
+
+function tickCooldowns() {
+  const now = Date.now();
+  for (const el of document.querySelectorAll('.u-cool[data-until]')) {
+    const until = Number(el.dataset.until) || 0;
+    const left = Math.max(0, Math.ceil((until - now) / 60000));
+    el.textContent = left > 0 ? `冷却中（剩 ${left} 分钟）` : '冷却结束';
+  }
+}
+
+async function loadUsage(silent) {
+  try {
+    const r = await fetch(BASE + '/api/usage', { headers: authHeaders() });
+    const d = await r.json();
+    usageRows = d.rows || [];
+    const cooling = usageRows.filter(x => x.blocked).length;
+    const badge = $('#usage-badge');
+    if (badge) { badge.textContent = cooling ? String(cooling) : ''; badge.classList.toggle('hidden', !cooling); }
+    if (!silent) {
+      $('#usage-status').textContent = `${usageRows.length} 条门×模型记录 · 限流后自动冷却 ${Math.round((d.cooldownMs || 0) / 60000)} 分钟`;
+      renderUsage();
+    }
+  } catch (e) {
+    if (!silent) $('#usage-status').textContent = '读取失败: ' + String((e && e.message) || e);
+  }
+}
+
+$('#btn-usage').addEventListener('click', () => {
+  $('#usage-mask').classList.remove('hidden');
+  renderUsage();
+  loadUsage(false);
+  if (!usageTimer) usageTimer = setInterval(() => { if (!$('#usage-mask').classList.contains('hidden')) loadUsage(false); }, 60000);
+});
+$('#btn-usage-close').addEventListener('click', () => {
+  $('#usage-mask').classList.add('hidden');
+  if (usageTimer) { clearInterval(usageTimer); usageTimer = null; }
+});
+$('#btn-usage-refresh').addEventListener('click', () => loadUsage(false));
+$('#usage-mask').addEventListener('click', (e) => { if (e.target.id === 'usage-mask') $('#usage-mask').classList.add('hidden'); });
 
 // ---------- 外部会话雷达 ----------
 const STATE_LABEL = { dead: '半路死了', active: '在跑', idle: '静默', ended: '已结束' };

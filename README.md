@@ -23,6 +23,7 @@ Most agent orchestrators in 2026 are worktree/diff/PR centric — they treat age
 - **Workspace as security boundary** — headless members run inside the group workspace directory (a takeover dispatch runs in the dead session's own directory, by design).
 - **Local-only + token auth** — the embedded server binds to 127.0.0.1 with a random per-install token; nothing phones home.
 - **Session radar & takeover** — reads the transcripts each harness already writes to disk (ZCode, Claude Code, Codex), shows which sessions are still running, gone quiet, or **died mid-task and why** (quota exhausted, auth failure, dropped connection), and hands any of them to another member — *in that session's own working directory*, so the work continues instead of being re-explained.
+- **Usage ledger & rate-limit cooldown** — Settings-free bookkeeping per member × model: calls today, success/failure split, failure *layer* (rate limit / auth / expired subscription / not detected / timeout), median duration, and per-task-type success. Hitting a rate limit puts that member on a 30-minute cooldown instead of hammering it; auth and expiry failures are never "cooled", because retrying them doesn't heal anything.
 - **Tray-resident** — closing the window keeps the group working; quit from the tray menu.
 - **Bundled Node runtime** — members whose CLI ships as a `.js`/`.cjs` entry (ZCode, Cline via npx) run on the Node embedded in Electron, so a system Node is no longer required.
 - **Self-updating** — checks this repo's GitHub Releases on startup and every 30 minutes, then downloads and launches the installer from inside the app.
@@ -98,6 +99,7 @@ MIT — see [LICENSE](LICENSE).
 - **自定义成员**：任意 CLI agent 填 `program` + 参数模板（`{{prompt}}`/`{{model}}`/`{{cwd}}`）即可入群，无需写代码
 - **权限模式逐成员可配**，群工作区即安全边界；本地 127.0.0.1 + 随机 token，不上传任何数据
 - **托盘常驻**：关窗群继续干活
+- **用量账本与限流冷却**：侧栏「📊 用量」按 成员×模型 记今天用了多少、成/败、失败卡在哪一层（限流/鉴权/订阅到期/没检测到/超时）、中位耗时，以及按任务类型的成功率；撞限流自动冷却 30 分钟，鉴权和到期类失败不冷却（重试不会自愈）
 - **自带 Node 运行时**：ZCode、Cline(npx) 这类 `.js/.cjs` 入口的成员用 Electron 内嵌的 Node 跑，用户机器不装 Node 也能用
 - **自动更新**：启动时与每 30 分钟查一次本仓 GitHub Releases，设置里「检查更新」或顶部横幅一键下载安装包
 

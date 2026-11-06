@@ -14,6 +14,8 @@ const { safeExec } = require('./safe-spawn');
 const { MEMBERS, buildCustomSpawn, resolveCommand, resolveMemberProgram, listModels } = require('./adapters');
 const { Store } = require('./store');
 const { listSessions } = require('./sessions');
+const usage = require('./usage');
+const { assertNoForeignCredentials } = require('./guard');
 
 const ANSI_RE = /[\u001b\u009b][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[-a-zA-Z\d/#&.:=?%@~_]*)*)?\u0007)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-ntqry=><~]))/g;
 const stripAnsi = (s) => s.replace(ANSI_RE, '');
@@ -88,6 +90,7 @@ class GroupServer {
     }
 
     this.messages = this.store.loadMessages();
+    usage.init(this.dataDir);   // 用量账本与转录同目录，重启后从盘上重算
     this.wsClients = new Set();
     this.running = new Map(); // taskId -> child
 
@@ -155,6 +158,16 @@ class GroupServer {
     if (url.pathname.startsWith('/api/') && !this.authed(req)) {
       return json(401, { error: 'unauthorized' });
     }
+    if (req.method === 'GET' && url.pathname === '/api/usage') {
+      // 用量账本：哪家今天用了多少、成功失败分类、是否在限流冷却里、哪些是免费档
+      const snap = usage.snapshot(Date.now());
+      const names = {};
+      for (const m of this.members) names[m.id] = m.name;
+      return json(200, {
+        now: snap.now, cooldownMs: snap.cooldownMs,
+        rows: snap.rows.map(r => ({ ...r, memberName: names[r.memberId] || r.memberId }))
+      });
+    }
     if (req.method === 'GET' && url.pathname === '/api/sessions') {
       // 外部会话雷达：读各家 harness 自己落在盘上的会话，供"接手"用
       const n = Math.min(Math.max(parseInt(url.searchParams.get('limit') || '12', 10) || 12, 1), 50);
@@ -196,8 +209,8 @@ class GroupServer {
       req.on('data', c => { body += c; if (body.length > 512 * 1024) req.destroy(); });
       req.on('end', () => {
         try {
-          const { text, prompt, memberId, threadId, model, cwd } = JSON.parse(body);
-          return json(200, this.handleSend(String(text || ''), String(prompt || '') || String(text || ''), memberId || null, threadId || null, model || null, cwd || null));
+          const { text, prompt, memberId, threadId, model, cwd, taskKind } = JSON.parse(body);
+          return json(200, this.handleSend(String(text || ''), String(prompt || '') || String(text || ''), memberId || null, threadId || null, model || null, cwd || null, taskKind || null));
         } catch (e) { return json(400, { error: String(e.message || e) }); }
       });
       return;
@@ -285,7 +298,7 @@ class GroupServer {
     return null;
   }
 
-  handleSend(text, prompt, memberId, threadId, modelOverride, cwd) {
+  handleSend(text, prompt, memberId, threadId, modelOverride, cwd, taskKind) {
     const now = Date.now();
     this.push({ id: id(), type: 'user', text, at: now, threadId: threadId || null });
 
@@ -303,7 +316,7 @@ class GroupServer {
       .replace(new RegExp(`@${member.id}`, 'gi'), '')
       .trim() || prompt;
     const tid = threadId || id();
-    return { ok: true, dispatched: true, threadId: tid, task: this.runTask(member, cleanPrompt, tid, modelOverride, cwd) };
+    return { ok: true, dispatched: true, threadId: tid, task: this.runTask(member, cleanPrompt, tid, modelOverride, cwd, taskKind) };
   }
 
   /**
@@ -320,13 +333,25 @@ class GroupServer {
     }
   }
 
-  runTask(member, prompt, threadId, modelOverride, cwdOverride) {
+  runTask(member, prompt, threadId, modelOverride, cwdOverride, taskKindOverride) {
     const model = modelOverride || member.defaultModel || '';
     const workDir = GroupServer.resolveWorkDir(cwdOverride, this.config.workspace);
+    const taskKind = String(taskKindOverride || 'unclassified');
     const task = {
       id: id(), type: 'task', threadId, memberId: member.id, memberName: member.name,
-      color: member.color, prompt, text: '', status: 'running', at: Date.now(), model, cwd: workDir
+      color: member.color, prompt, text: '', status: 'running', at: Date.now(), model,
+      cwd: workDir, taskKind
     };
+
+    // 闸门：刚撞过限流的成员×模型先歇 30 分钟，别拿重试把配额打穿
+    const gate = usage.isBlocked(member.id, model);
+    if (gate.blocked) {
+      task.status = 'error';
+      task.text = gate.reason + '（要立刻换一家，直接在群里 @ 别的成员）';
+      this.push(task);
+      usage.record({ memberId: member.id, model, taskKind, status: 'blocked', ms: 0, errorKind: 'rate_limit' });
+      return task;
+    }
     this.push(task);
 
     const built = member.custom
@@ -339,6 +364,18 @@ class GroupServer {
         : built.error;
       this.store.appendMessage({ type: 'task_status', taskId: task.id, status: 'error', at: Date.now() });
       this.broadcast({ event: 'message', msg: { ...task } });
+      return task;
+    }
+
+    // 凭证守卫：别家的凭据文件路径出现在参数或环境里，宁可不派
+    try {
+      assertNoForeignCredentials(member.id, { args: built.args, env: built.env });
+    } catch (e) {
+      task.status = 'error';
+      task.text = String((e && e.message) || e);
+      this.store.appendMessage({ type: 'task_status', taskId: task.id, status: 'error', at: Date.now() });
+      this.broadcast({ event: 'message', msg: { ...task } });
+      usage.record({ memberId: member.id, model, taskKind, status: 'error', ms: Date.now() - task.at, errorKind: 'blocked by guard' });
       return task;
     }
 
@@ -407,6 +444,10 @@ class GroupServer {
     if (code !== undefined && code !== 0 && code !== null) {
       task.text += `\n[进程退出码 ${code}]`;
     }
+    usage.record({
+      memberId: task.memberId, model: task.model || '', taskKind: task.taskKind || 'unclassified',
+      status, ms: Date.now() - task.at, output: task.text
+    });
     this.store.appendMessage({ type: 'task_status', taskId: task.id, status, code: code ?? null, at: Date.now() });
     this.broadcast({ event: 'message', msg: { ...task } });
   }

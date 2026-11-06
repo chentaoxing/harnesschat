@@ -16,6 +16,7 @@
     <div class="member-list" id="member-list"></div>
     <div class="sidebar-foot">
       <button id="btn-sessions" class="ghost-btn">🛰 外部会话 Sessions <span id="sessions-badge" class="badge hidden"></span></button>
+      <button id="btn-usage" class="ghost-btn">📊 用量 Usage <span id="usage-badge" class="badge hidden"></span></button>
       <button id="btn-settings" class="ghost-btn">⚙ 设置 Settings</button>
     </div>
   </aside>
@@ -33,6 +34,14 @@
     <div id="messages"></div>
     <div id="composer">
       <div id="mention-pop" class="hidden"></div>
+      <select id="task-kind" title="任务类型：账本按它统计，将来路由也按它选门">
+        <option value="unclassified">类型：未分类</option>
+        <option value="execute">类型：写代码/执行</option>
+        <option value="research">类型：调研/检索</option>
+        <option value="review">类型：评审/挑刺</option>
+        <option value="summarize">类型：总结/提炼</option>
+        <option value="rescue">类型：救卡住的活</option>
+      </select>
       <input id="model-input" type="text" list="model-list" placeholder="模型（留空=成员默认）">
       <datalist id="model-list"></datalist>
       <textarea id="input" rows="2" placeholder="输入消息，@成员 派任务（如：@Codex 把 README 翻成英文）"></textarea>
@@ -49,6 +58,21 @@
     <p class="en">HarnessChat runs AI harnesses (Codex, Claude Code, Qoder CLI…) as command-line processes inside the <strong>group workspace directory</strong>. Depending on the permission mode you pick per member, they may <strong>read/write files and run commands without confirmation</strong>. Only add harnesses you trust, and point the workspace at a dedicated directory.</p>
     <div class="set-actions">
       <button id="btn-firstrun-ok" class="primary-btn">我已了解 / I understand</button>
+    </div>
+  </div>
+</div>
+
+<!-- 用量账本 -->
+<div id="usage-mask" class="hidden">
+  <div id="usage">
+    <h3>用量账本 <span class="sm-hint">哪家今天用了多少、失败卡在哪一层、是否在限流冷却里</span></h3>
+    <div class="sess-toolbar">
+      <button id="btn-usage-refresh" class="chip">刷新</button>
+      <span id="usage-status" class="sm-hint"></span>
+    </div>
+    <div id="usage-list"></div>
+    <div class="set-actions">
+      <button id="btn-usage-close" class="ghost-btn">关闭 Close</button>
     </div>
   </div>
 </div>
