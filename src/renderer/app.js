@@ -286,15 +286,28 @@ function updateComposerPlaceholder() {
 }
 
 // ---------- 用量账本 ----------
-const KIND_LABEL = { rate_limit: '限流', auth: '鉴权', expired: '订阅到期', not_found: '没检测到', timeout: '超时', other: '其它' };
+const KIND_LABEL = { rate_limit: '限流', auth: '鉴权', expired: '订阅到期', not_found: '没检测到', timeout: '超时', gateway: '网关侧', other: '其它' };
+// 结论的措辞刻意区分"实测"和"自称"：上一版我只凭模型 id 里带 free 就写"免费档"，
+// 那是把我的猜测当成事实报给他。
+const EV_LABEL = {
+  'ok-observed': '实测可用',
+  'quota-capped': '实测有额度上限',
+  'gateway-down': '网关侧不通',
+  'auth-fail': '鉴权不通',
+  expired: '订阅到期',
+  'id-only': '仅 id 自称'
+};
 let usageRows = [];
+let usageTerminal = [];
+let usageCoverage = [];
+let usageTruncated = false;
 let usageTimer = null;
 
 function renderUsage() {
   const box = $('#usage-list');
   if (!box) return;
   box.innerHTML = '';
-  if (!usageRows.length) {
+  if (!usageRows.length && !usageTerminal.length) {
     box.innerHTML = '<div class="sess-empty">还没有派单记录。派一单之后这里会按成员×模型累计：今天几次、成没成、失败卡在哪一层、是否在冷却。</div>';
     return;
   }
@@ -303,22 +316,51 @@ function renderUsage() {
     div.className = 'usage-row' + (r.blocked ? ' cooling' : '');
     const kinds = Object.entries(r.byKind || {}).map(([k, n]) => `<span class="u-kind ${k}">${KIND_LABEL[k] || k} ${n}</span>`).join('');
     const tasks = Object.entries(r.byTask || {}).map(([k, v]) => `<span class="u-task">${k} ${v.ok}/${v.ok + v.fail}</span>`).join('');
+    const ev = r.freeEvidence || {};
+    const term = (r.terminalTotal ? ` · 终端里另观察到 <b>${r.terminalToday}</b> 次今天（累计 ${r.terminalTotal}${r.terminalPartial ? '，至少' : ''}）` : '');
     div.innerHTML = `
       <div class="u-head">
         <b>${esc(r.memberName)}</b>
         <span class="u-model">${esc(r.model || '成员默认模型')}</span>
-        ${r.free ? '<span class="u-free">免费档</span>' : ''}
+        ${EV_LABEL[ev.verdict] ? `<span class="u-free ${esc(ev.verdict)}" title="${esc(ev.note || '')}">${EV_LABEL[ev.verdict]}</span>` : ''}
         ${r.blocked ? '<span class="u-cool" data-until="' + r.cooldownUntil + '">冷却中</span>' : ''}
       </div>
       <div class="u-nums">
-        今天 <b>${r.today}</b> 次 · 累计 ${r.total} · 成 ${r.ok} / 败 ${r.fail}
+        我派的 今天 <b>${r.today}</b> 次 · 累计 ${r.total} · 成 ${r.ok} / 败 ${r.fail}${term}
         ${r.medianMs ? ' · 中位 ' + Math.round(r.medianMs / 1000) + 's' : ''}
       </div>
+      ${ev.note ? `<div class="u-ev">${esc(ev.note)}${ev.idClaimsFree ? '（模型 id 自称免费）' : ''}</div>` : ''}
       ${kinds ? `<div class="u-kinds">${kinds}</div>` : ''}
       ${tasks ? `<div class="u-kinds">${tasks}</div>` : ''}`;
     box.appendChild(div);
   }
+  renderTerminalBlock();
   tickCooldowns();
+}
+
+// 终端观测明细 + 覆盖面：这一段的作用是让他知道"哪些数我没看见"，
+// 而不是给一个看起来完整的合计。
+function renderTerminalBlock() {
+  const box = $('#usage-list');
+  if (!box || !box.parentNode) return;
+  const old = document.getElementById('terminal-block');
+  if (old) old.remove();
+  const wrap = document.createElement('div');
+  wrap.id = 'terminal-block';
+  const cov = (usageCoverage || []).filter(c => c.status !== 'counted');
+  const rowsByMember = {};
+  for (const t of usageTerminal) (rowsByMember[t.memberName || t.memberId] = rowsByMember[t.memberName || t.memberId] || []).push(t);
+  const parts = [];
+  for (const name of Object.keys(rowsByMember)) {
+    for (const t of rowsByMember[name]) {
+      parts.push(`<div class="u-row2">${esc(name)} · ${esc(t.model)}：今天 <b>${t.today}</b> / 累计 ${t.total}${t.partial ? '（至少）' : ''} · 败 ${t.fail}</div>`);
+    }
+  }
+  wrap.innerHTML = `
+    <div class="u-sect">他在各家自己终端里跑掉的（从各家转录读，不是我派的）${usageTruncated ? ' · 已到扫描上限，下面是"至少"' : ''}</div>
+    ${parts.length ? parts.join('') : '<div class="u-row2 dim">最近 7 天没有可归因的模型往返记录</div>'}
+    ${cov.length ? `<div class="u-sect">未统计的家（认不出转录布局就不猜）</div><div class="u-row2 dim">${cov.map(c => esc(c.memberName || c.memberId)).join(' · ')}</div>` : ''}`;
+  box.appendChild(wrap);
 }
 
 function tickCooldowns() {
@@ -335,11 +377,17 @@ async function loadUsage(silent) {
     const r = await fetch(BASE + '/api/usage', { headers: authHeaders() });
     const d = await r.json();
     usageRows = d.rows || [];
+    usageTerminal = d.terminalRows || [];
+    usageCoverage = d.terminalCoverage || [];
+    usageTruncated = !!d.terminalTruncated;
     const cooling = usageRows.filter(x => x.blocked).length;
     const badge = $('#usage-badge');
     if (badge) { badge.textContent = cooling ? String(cooling) : ''; badge.classList.toggle('hidden', !cooling); }
     if (!silent) {
-      $('#usage-status').textContent = `${usageRows.length} 条门×模型记录 · 限流后自动冷却 ${Math.round((d.cooldownMs || 0) / 60000)} 分钟`;
+      const uncounted = usageCoverage.filter(c => c.status !== 'counted').length;
+      $('#usage-status').textContent = `${usageRows.length} 条门×模型记录 · 终端观测 ${usageTerminal.length} 组${uncounted ? ' · ' + uncounted + ' 家未统计' : ''} · 限流后自动冷却 ${Math.round((d.cooldownMs || 0) / 60000)} 分钟`;
+      renderUsage();
+    } else {
       renderUsage();
     }
   } catch (e) {

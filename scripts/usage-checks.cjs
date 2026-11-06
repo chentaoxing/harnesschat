@@ -140,6 +140,62 @@ const byKindRow = usage.snapshot(NOW).rows.find(r => r.memberId === 'cline');
 check('按任务类型能看出谁干这类活更稳', byKindRow && byKindRow.byTask.review.ok === 2 && byKindRow.byTask.execute.fail === 1,
   byKindRow && JSON.stringify(byKindRow.byTask));
 
+// ---------- 9. 免费档的"证据来源"：id 自称 ≠ 实测 ----------
+// 起因：我一度把模型名里带 free 就当"免费、放心派"，但真正的免费档是有额度上限的，
+// 而上限这件事只有实测才知道。面板必须说清这条结论是从哪来的。
+fresh();
+usage.record({ memberId: 'cline', model: 'cline-free/kimi-k3', status: 'done', ms: 10, at: NOW });
+let evRow = usage.snapshot(NOW).rows.find(r => r.model === 'cline-free/kimi-k3');
+check('只跑成功过一次的免费档：结论是"实测可用"，不是只凭 id', evRow && (evRow && evRow.freeEvidence || {}).verdict === 'ok-observed', evRow && JSON.stringify((evRow && evRow.freeEvidence || {})));
+check('证据里保留"id 自称免费"这一层（它只是标签，不是结论）', evRow && (evRow && evRow.freeEvidence || {}).idClaimsFree === true, evRow && JSON.stringify((evRow && evRow.freeEvidence || {})));
+
+fresh();
+usage.record({ memberId: 'cline', model: 'cline-free/kimi-k3', status: 'error', ms: 10, output: '429 Too Many Requests', at: NOW });
+evRow = usage.snapshot(NOW).rows.find(r => r.model === 'cline-free/kimi-k3');
+check('撞过限流的免费档：结论改成"实测有额度上限"', evRow && (evRow && evRow.freeEvidence || {}).verdict === 'quota-capped', evRow && JSON.stringify((evRow && evRow.freeEvidence || {})));
+check('结论带上第几次撞的（今天第 N 次才有意义）', evRow && (evRow && evRow.freeEvidence || {}).rateLimit === 1, evRow && JSON.stringify((evRow && evRow.freeEvidence || {})));
+
+fresh();
+usage.record({ memberId: 'codebuddy', model: 'custom-local:deepseek-v4-flash-free', status: 'done', ms: 10, at: NOW });
+usage.record({ memberId: 'codebuddy', model: 'custom-local:kimi-k3', status: 'done', ms: 10, at: NOW });
+rows = usage.snapshot(NOW).rows;
+check('模型名不带 free 但实测成功过 → 结论仍是实测来的，并标它没自称免费',
+  ((rows.find(r => r.model === 'custom-local:kimi-k3') || {}).freeEvidence || {}).verdict === 'ok-observed' &&
+  ((rows.find(r => r.model === 'custom-local:kimi-k3') || {}).freeEvidence || {}).idClaimsFree === false,
+  JSON.stringify(((rows.find(r => r.model === 'custom-local:kimi-k3') || {}).freeEvidence || {})));
+
+fresh();
+usage.record({ memberId: 'cline', model: 'cline-free/mimo-v2.6-flash', status: 'blocked', ms: 0, at: NOW });
+evRow = usage.snapshot(NOW).rows.find(r => r.model === 'cline-free/mimo-v2.6-flash');
+check('一次都没真打到厂商（全被闸门拦下）→ 结论只能说"仅 id 自称免费"',
+  (evRow && (evRow && evRow.freeEvidence || {}).verdict) === 'id-only', JSON.stringify(evRow && evRow.freeEvidence));
+
+// ---------- 10. 网关侧失败不是这一家的锅（实测来自 cbc→new-api） ----------
+check('能识别"没有可用渠道"是网关层，不是成员坏了', usage.classifyError({ status: 'error', output: '503 No available channel for model x under group default (distributor)' }) === 'gateway');
+check('能识别"上游请求发不出去"是网关层', usage.classifyError({ status: 'error', output: '500 upstream error: do request failed (request id: 2026...)' }) === 'gateway');
+fresh();
+usage.record({ memberId: 'codebuddy', model: 'custom-local:grok-4.5', status: 'error', ms: 10, output: '503 No available channel for model grok-4.5 under group default (distributor)', at: NOW });
+evRow = usage.snapshot(NOW).rows.find(r => r.memberId === 'codebuddy');
+check('网关不通不进冷却（重试要改的是网关，不是把这扇门关 30 分钟）', usage.isBlocked('codebuddy', 'custom-local:grok-4.5', NOW + 60 * 1000).blocked === false);
+check('结论标成"网关侧不通"并给出该找谁', evRow && (evRow && evRow.freeEvidence || {}).verdict === 'gateway-down' && /网关/.test((evRow && evRow.freeEvidence || {}).note), evRow && JSON.stringify((evRow && evRow.freeEvidence || {})));
+check('鉴权失败优先于网关（有 key 形状字样时不能盖成网关问题）', usage.classifyError({ status: 'error', output: 'Invalid token for api_key while calling upstream' }) === 'auth');
+
+// ---------- 11. 退出码 0 不等于成功（本机实测：cbc 把网关报错打在 stdout 上退 0） ----------
+// 这一条是假绿：账本只看 exit code，于是"401 Invalid token"被记成 ok、结论写成"实测成功过"。
+check('退出 0 但输出是厂商/网关的裸错误行 → 判失败', usage.deriveStatus(true, '401 Invalid token (request id: 202611061919255986347348268d9d6WvdV75L3)\n') === 'error');
+check('503 无可用渠道同样判失败', usage.deriveStatus(true, '503 No available channel for model x under group default (distributor) (request id: 2026...)\n') === 'error');
+check('500 上游发不出去同样判失败', usage.deriveStatus(true, '500 upstream error: do request failed (request id: 2026...)\n') === 'error');
+check('未登录回 Authentication required 判失败', usage.deriveStatus(true, 'Authentication required. Please use /login command to sign in to your account\n') === 'error');
+check('正常回答不误判（哪怕内容里就在讲 401）', usage.deriveStatus(true, '401 一般表示未授权，先检查 key 是否正确。\n\n补充一句：你的报错里带了 request id: 说明请求已经到网关。') === 'done');
+check('空输出不误判成失败（有的成员只写文件不回话）', usage.deriveStatus(true, '') === 'done');
+check('退出码非 0 时不管输出是什么都算失败', usage.deriveStatus(false, '看起来一切正常') === 'error');
+check('判出来的失败还能落到正确的层', usage.classifyError({ status: 'error', output: '401 Invalid token (request id: 2026...)' }) === 'auth');
+fresh();
+usage.record({ memberId: 'codebuddy', model: 'custom-local:deepseek-v4-flash-free', status: usage.deriveStatus(true, '503 No available channel for model x under group default (distributor) (request id: 2026...)'), ms: 5000, output: '503 No available channel for model x under group default (distributor) (request id: 2026...)', at: NOW });
+evRow = usage.snapshot(NOW).rows.find(r => r.memberId === 'codebuddy');
+check('这种失败进账后结论不能再是"实测成功过"', (evRow && (evRow && evRow.freeEvidence || {}).verdict) === 'gateway-down', JSON.stringify(evRow && evRow.freeEvidence));
+check('这种失败计入 fail 而不是 ok', evRow && evRow.fail === 1 && evRow.ok === 0, evRow && JSON.stringify({ ok: evRow.ok, fail: evRow.fail }));
+
 // ---------- 结果 ----------
 console.log(`\n通过 ${oks.length} 项`);
 if (fails.length) {

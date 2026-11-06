@@ -68,6 +68,63 @@ function safeReadDirs(dir) {
   try { return fs.readdirSync(dir, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name); } catch (e) { return []; }
 }
 
+/**
+ * CodeBuddy（腾讯 cbc，WorkBuddy 桌面端自带的无头 CLI）的入口探测。
+ *
+ * 这里记一条实测教训：我先前把它判死过一次，报的是 MODULE_NOT_FOUND。真实原因不是
+ * "它没有无头模式"，而是两件事：
+ *   1. 这个变体的 cli/dist 里只有 codebuddy-lite-wb.mjs（headless/full 产物根本没打进包），
+ *      而 launcher 里那条产物只在 CODEBUDDY_FORCE_LITE_WB_BUNDLE=1 时才走 ESM import；
+ *      不给这个开关，它就一路 require 不存在的 codebuddy-headless/codebuddy 然后 MODULE_NOT_FOUND。
+ *   2. 代理环境变量会让它自己的 axios setProxy 抛 TypeError（Right-hand side of 'instanceof'），
+ *      结果配置拉不到，被误报成 "Authentication required"。
+ * 所以：lite-wb 产物不在就不认这个入口（认了也是必挂），并且派单时显式摘掉代理。
+ */
+const CODEBUDDY_REL = path.join('resources', 'app.asar.unpacked', 'cli');
+function codebuddyRoots(opts) {
+  if (opts && Array.isArray(opts.roots)) return opts.roots;
+  const pf = [process.env.ProgramFiles, process.env['ProgramFiles (x86)'], process.env['PROGRAMFILES(X86)'],
+    'C:\\Program Files', 'D:\\Program Files', 'C:\\Program Files (x86)'].filter(Boolean);
+  const out = [];
+  for (const base of pf) {
+    for (const name of ['WorkBuddy', 'workbuddy', 'CodeBuddy']) out.push(path.join(base, name));
+  }
+  const local = process.env.LOCALAPPDATA;
+  if (local) out.push(path.join(local, 'Programs', 'WorkBuddy'));
+  return out;
+}
+
+function findCodebuddyCli(opts) {
+  for (const root of codebuddyRoots(opts)) {
+    const bin = path.join(root, CODEBUDDY_REL, 'bin', IS_WIN ? 'codebuddy' : 'codebuddy');
+    const lite = path.join(root, CODEBUDDY_REL, 'dist', 'codebuddy-lite-wb.mjs');
+    try {
+      fs.accessSync(bin);
+      fs.accessSync(lite);
+      return bin;
+    } catch (e) { /* 这个根没有，试下一个 */ }
+  }
+  return null;
+}
+
+// 代理变量必须逐个置 null 交给 childEnv 去删（实测：留着它会把登录态误报成没登录）
+const CODEBUDDY_PROXY_VARS = ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy'];
+function codebuddyEnv() {
+  const out = { CODEBUDDY_FORCE_LITE_WB_BUNDLE: '1' };
+  for (const v of CODEBUDDY_PROXY_VARS) out[v] = null;
+  return out;
+}
+
+// 它公开列出的模型 id 就在 WorkBuddy 自己的 models.json 里（那是它读的配置，不是凭据文件）
+function listCodebuddyModels() {
+  const p = path.join(os.homedir(), '.workbuddy', 'models.json');
+  try {
+    const arr = JSON.parse(fs.readFileSync(p, 'utf8'));
+    if (!Array.isArray(arr)) return [];
+    return arr.map(m => m && m.id).filter(Boolean).map(id => 'custom-local:' + id);
+  } catch (e) { return []; }
+}
+
 // ---------- 命令探测 ----------
 function whichAll(cmd) {
   try {
@@ -123,6 +180,20 @@ function resolveCommand(nameOrPath) {
     const runner = nodeRunner();
     if (runner) resolved = { file: runner.file, prefix: [resolved.file, ...resolved.prefix], env: { ...resolved.env, ...runner.env } };
   }
+  // 无扩展名的 shebang 脚本（CodeBuddy 的 bin/codebuddy 正是这种）：Windows 上没有文件关联，
+  // 直接 spawn 会失败，必须显式交给 node 跑。判据是它自己的 shebang，不是我猜的。
+  if (!resolved && isPath && !path.extname(nameOrPath)) {
+    try {
+      const fd = fs.openSync(nameOrPath, 'r');
+      const buf = Buffer.alloc(80);
+      let n = 0;
+      try { n = fs.readSync(fd, buf, 0, 80, 0); } finally { fs.closeSync(fd); }
+      if (/^#!.*node/.test(buf.slice(0, n).toString('utf8'))) {
+        const runner = nodeRunner();
+        if (runner) resolved = { file: runner.file, prefix: [nameOrPath], env: { ...runner.env } };
+      }
+    } catch (e) { /* 读不到就当不认 */ }
+  }
   shimCache.set(key, resolved);
   return resolved;
 }
@@ -151,6 +222,11 @@ const KNOWN_PATHS = {
 
 function resolveMemberProgram(member) {
   if (member.programPath) return resolveCommand(member.programPath);
+  // 自带"专用探测器"的成员优先（CodeBuddy 的入口要求 lite-wb 产物同时在位，通用探测认不准）
+  if (typeof member.resolveProgram === 'function') {
+    const p = member.resolveProgram();
+    if (p) return resolveCommand(p);
+  }
   for (const kp of (KNOWN_PATHS[member.id] || [])) {
     try { fs.accessSync(kp); return resolveCommand(kp); } catch (e) {}
   }
@@ -339,6 +415,30 @@ const MEMBERS = [
       if (task.model) args.push('--model', task.model);
       return { file: shim.file, args, env: shim.env };
     }
+  },
+  {
+    id: 'codebuddy',
+    name: 'CodeBuddy (cbc)',
+    color: '#1f6feb',
+    command: 'codebuddy',
+    modelSupport: true,
+    defaultModel: 'custom-local:deepseek-v4-flash-free',
+    modelHint: 'custom-local:<模型 id>（它自己 --help 与 ~/.workbuddy/models.json 列出来的那批）',
+    timeoutMin: 20,
+    modes: [
+      { id: 'default', args: [] },
+      { id: 'auto', args: ['-y'], bypass: true },
+      { id: 'bypass', args: ['--permission-mode', 'bypassPermissions'], bypass: true }
+    ],
+    noteZh: 'WorkBuddy 自带的无头 CLI（必须给 lite-wb 产物开关并摘掉代理，否则它自己会误报未登录）。它默认用 ~/.workbuddy/models.json 里的 custom-local:* —— 那批模型要 ${NEWAPI_KEY} 这类环境变量，不在 WorkBuddy 界面外就取不到：要么在系统环境里设好并把变量名写进设置的"额外透传变量"，要么在 WorkBuddy 里登录一次改用它的自带模型。我不会去翻它存的密钥。',
+    noteEn: 'Headless CLI shipped by WorkBuddy (needs the lite-wb bundle flag and proxy env cleared, otherwise it misreports "not logged in"). Its custom-local:* models read ~/.workbuddy/models.json and need ${NEWAPI_KEY}-style env vars; set them in the system environment and list the names in Settings, or log in inside WorkBuddy and use its own models. I never read its stored keys.',
+    resolveProgram() { return findCodebuddyCli(); },
+    buildSpawn(task, shim, modeArgs) {
+      if (!shim) return { error: 'NOT_FOUND' };
+      const args = [...shim.prefix, '-p', task.prompt, ...modeArgs, '--output-format', 'text'];
+      args.push('--model', task.model || 'custom-local:deepseek-v4-flash-free');
+      return { file: shim.file, args, env: Object.assign({}, shim.env, codebuddyEnv()) };
+    }
   }
 ];
 
@@ -420,8 +520,12 @@ function listModels(member) {
     case 'zcode': return { source: "config: ~/.zcode/v2/provider_config.json", models: listZcodeModels() };
     case 'codex': return { source: 'config: ~/.codex/config.toml', models: listCodexModels() };
     case 'minimax': return { source: 'config: ~/.minimax/config.yaml', models: listMinimaxModels() };
+    case 'codebuddy': {
+      const ms = listCodebuddyModels();
+      return { source: ms.length ? 'config: ~/.workbuddy/models.json（它自己读的配置）' : 'static: cbc --help', models: ms.length ? ms : ['custom-local:deepseek-v4-flash-free', 'custom-local:kimi-k3', 'custom-local:glm-5.3', 'custom-local:grok-4.5'] };
+    }
     default: return { source: 'static', models: STATIC_MODELS[member.id] || [] };
   }
 }
 
-module.exports = { MEMBERS, buildCustomSpawn, resolveCommand, resolveMemberProgram, findNode, listModels };
+module.exports = { MEMBERS, buildCustomSpawn, resolveCommand, resolveMemberProgram, findNode, listModels, findCodebuddyCli, codebuddyEnv };

@@ -15,6 +15,7 @@ const { MEMBERS, buildCustomSpawn, resolveCommand, resolveMemberProgram, listMod
 const { Store } = require('./store');
 const { listSessions } = require('./sessions');
 const usage = require('./usage');
+const terminalUsage = require('./terminal-usage');
 const { assertNoForeignCredentials } = require('./guard');
 
 const ANSI_RE = /[\u001b\u009b][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[-a-zA-Z\d/#&.:=?%@~_]*)*)?\u0007)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-ntqry=><~]))/g;
@@ -53,6 +54,8 @@ function childEnv(extra, envExtraNames) {
   }
   // 适配器自己注入的（ELECTRON_RUN_AS_NODE、ZCode 的 provider 路径等）优先级最高
   for (const [k, v] of Object.entries(extra || {})) {
+    // 显式置 null = 这个变量必须从子环境里消失（实测 CodeBuddy 留着代理会把登录态误报成未登录）
+    if (v === null) { delete out[k.toUpperCase()]; delete out[k]; continue; }
     if (typeof v === 'string' && v.length) out[k] = v;
   }
   return out;
@@ -159,13 +162,19 @@ class GroupServer {
       return json(401, { error: 'unauthorized' });
     }
     if (req.method === 'GET' && url.pathname === '/api/usage') {
-      // 用量账本：哪家今天用了多少、成功失败分类、是否在限流冷却里、哪些是免费档
-      const snap = usage.snapshot(Date.now());
+      // 用量账本：哪家今天用了多少、成功失败分类、是否在限流冷却里、免费档的结论从哪来；
+      // 另外并一份"他在各家自己终端里敲掉的"观测数（和派单数分两笔记，不相加冒充）。
+      const now = Date.now();
+      const terminal = terminalUsage.scanCached({ now, days: 7 });
+      const snap = usage.snapshot(now, terminal);
       const names = {};
       for (const m of this.members) names[m.id] = m.name;
       return json(200, {
         now: snap.now, cooldownMs: snap.cooldownMs,
-        rows: snap.rows.map(r => ({ ...r, memberName: names[r.memberId] || r.memberId }))
+        rows: snap.rows.map(r => ({ ...r, memberName: names[r.memberId] || r.memberId })),
+        terminalRows: snap.terminalRows.map(t => ({ ...t, memberName: names[t.memberId] || t.memberId })),
+        terminalCoverage: snap.terminalCoverage.map(c => ({ ...c, memberName: names[c.memberId] || c.memberId })),
+        terminalTruncated: snap.terminalTruncated
       });
     }
     if (req.method === 'GET' && url.pathname === '/api/sessions') {
@@ -349,7 +358,7 @@ class GroupServer {
       task.status = 'error';
       task.text = gate.reason + '（要立刻换一家，直接在群里 @ 别的成员）';
       this.push(task);
-      usage.record({ memberId: member.id, model, taskKind, status: 'blocked', ms: 0, errorKind: 'rate_limit' });
+      usage.record({ memberId: member.id, model, taskKind, status: 'blocked', ms: 0 });
       return task;
     }
     this.push(task);
@@ -440,15 +449,23 @@ class GroupServer {
   finishTask(task, status, child, code) {
     if (!this.running.has(task.id)) return;
     this.running.delete(task.id);
-    task.status = status;
     if (code !== undefined && code !== 0 && code !== null) {
       task.text += `\n[进程退出码 ${code}]`;
     }
+    // 退出码 0 不代表成功：有的成员把上游报错直接打在 stdout 上退 0（实测 CodeBuddy 就是这样）。
+    // 卡片和账本都用同一个判据，免得"界面显示成功、账本显示成功"一起错。
+    const finalStatus = status === 'timeout' ? 'timeout' : usage.deriveStatus(status === 'done', task.text);
+    if (finalStatus === 'error' && status === 'done') {
+      task.text += '\n[判为失败：这段输出是错误行而不是结果]';
+    }
+    task.status = finalStatus;
     usage.record({
       memberId: task.memberId, model: task.model || '', taskKind: task.taskKind || 'unclassified',
-      status, ms: Date.now() - task.at, output: task.text
+      status: finalStatus, ms: Date.now() - task.at, output: task.text
     });
-    this.store.appendMessage({ type: 'task_status', taskId: task.id, status, code: code ?? null, at: Date.now() });
+    // 这一笔同时会出现在那家的转录里：作废终端观测缓存，让面板下一眼就能看到新账
+    terminalUsage.invalidate();
+    this.store.appendMessage({ type: 'task_status', taskId: task.id, status: finalStatus, code: code ?? null, at: Date.now() });
     this.broadcast({ event: 'message', msg: { ...task } });
   }
 }

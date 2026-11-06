@@ -301,3 +301,13 @@ body { font-family: "Microsoft YaHei", "Segoe UI", sans-serif; font-size: 14px; 
 .about-line { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
 #app-version { color: var(--text); font-size: 13px; }
 #btn-check-update:disabled { opacity: .55; cursor: default; }
+
+/* 用量面板：结论标签与终端观测 */
+.u-free.quota-capped { background: #fff6e5; color: #b8860b; }
+.u-free.gateway-down, .u-free.auth-fail { background: #fdecec; color: #c0392b; }
+.u-free.id-only { background: #eef1f5; color: #6b7280; }
+.u-free.expired { background: #fdecec; color: #c0392b; }
+.u-ev { font-size: 11px; color: #6b7280; margin-top: 4px; }
+.u-sect { font-size: 11px; color: #6b7280; margin: 12px 0 4px; border-top: 1px dashed #e3e6ea; padding-top: 8px; }
+.u-row2 { font-size: 12px; color: #374151; padding: 2px 0; }
+.u-row2.dim { color: #9ca3af; }

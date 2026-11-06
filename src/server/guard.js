@@ -7,7 +7,7 @@
 // 判定故意保守：只看"像路径的字符串"，普通提示词里出现 auth.json 字样不误伤；
 // 成员引用自家目录下的登录文件是正常用法，放行。
 
-const CRED_SHAPED = /(auth\.json|credentials?\.json|connector-keys|\.key$|token\.txt|id_rsa|\.env$|cookies|secrets?$|\.aws[\\/]credentials)/i;
+const CRED_SHAPED = /(auth\.json|credentials?\.json|connector-keys|\.key$|token\.txt|id_rsa|\.env$|cookies|secrets?$|\.aws[\\/]credentials|hosts\.yml|\.config[\\/]gh)/i;
 const PATH_SHAPED = /^(?:[a-zA-Z]:[\\/]|~?[\\/])/;
 
 // 每个内置成员"自己家"的目录名；路径落在自家目录里就不算外借
@@ -19,7 +19,10 @@ const OWN_HOME = {
   qoderclicn: ['.qoder'],
   cline: ['.cline'],
   hermes: ['.hermes'],
-  minimax: ['.minimax']
+  minimax: ['.minimax'],
+  // CodeBuddy 的自家只有 .codebuddy：它的桌面端把 connector-keys 存在 .workbuddy 里，
+  // 那是"它自己的密钥"，不是"我们可以指过去的文件"——所以 .workbuddy 故意不放进来。
+  codebuddy: ['.codebuddy']
 };
 
 function assertNoForeignCredentials(memberId, spawn) {

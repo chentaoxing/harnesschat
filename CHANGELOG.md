@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.2 (2026-11-07)
+
+把"没做的"做完：账本从"只记我派的"扩到"看得见它在终端里干的"，免费档的结论改成有证据的结论，CodeBuddy 接成成员——以及一个真机逼出来的假绿修复。
+
+- **退出码 0 不再等于成功**（`usage.deriveStatus()`，`finishTask` 统一用它）。实测形态：CodeBuddy 撞到网关报错时把 `503 No available channel …(request id: …)` / `401 Invalid token …` 打在 stdout 上**退 0**，只看退出码的账本把它记成"成功"，面板结论写着"实测可用"——这是最坏的一种假绿：闸门和路由会据此把活派给它。现在卡片与账本用同一判据，只认它自己那种"裸错误行"的形状（行首 4xx/5xx + ASCII + `request id:`/`(distributor)`/`no available channel`），正文里正常讨论"401 是什么"不误杀。`scripts/gate-integration.cjs` 用假成员把两种情况都钉住了。
+- **新增失败层 `gateway`（网关侧）**：`No available channel` / `upstream error: do request failed` / `(distributor)` 归到本机网关，不冷却那一扇门——该修的是路由，不是等 30 分钟。
+- **免费档改成"证据 + 结论"**（`freeEvidence`）：以前模型 id 里带 `free` 就标"免费档"，那是把自称当事实。现在每个 成员×模型 给一个结论：`实测可用` / `实测有额度上限`（真撞过限流）/ `鉴权不通` / `网关侧不通` / `订阅到期` / `仅 id 自称`（一次都没真打到厂商），并在下一行写明依据。
+- **终端会话用量并入账本**（`src/server/terminal-usage.js`）：他在各家自己终端里手敲的那部分，以前我完全看不见，"今天谁还闲着"就是假的。现在从转录里逐条归因：ZCode 一条 `model_io` 记录 = 一次模型往返（带它自己写下的模型 id 与耗时），Claude Code 一条 `assistant` 记录 = 一次往返（`<synthetic>` 不算）。面板上「我派的」和「终端里另观察到」分两笔记，**不相加**——因为我分不出某一条是不是我自己派的，相加就是把猜测报成精确。认不出布局的家（Codex 存 `.jsonl.zst`，且一轮里几次往返分不开）在面板上明写"未统计"。
+- 扫描是有界的：只读时间窗内改过的文件、按 64 MB / 400 个文件封顶，**触顶就把该行标成"至少 N 次"**。此前用 24 MB 时，本机 91 次往返只数到 17 次——那不是保守，那是把数报小。逐行流式读，不把 47 MB 的文件整块读进主进程。与独立全量核对：91 = 91。
+- **新内置成员 CodeBuddy（cbc）**：WorkBuddy 桌面端自带的无头 CLI。我先前把它判死过一次（`MODULE_NOT_FOUND`），真实原因两条都实测了：① 这个包的 `cli/dist` 只有 `codebuddy-lite-wb.mjs`，不给 `CODEBUDDY_FORCE_LITE_WB_BUNDLE=1` 它就一路 require 不存在的 headless/full 产物；② 代理环境变量会让它自己的 `axios setProxy` 抛 `TypeError`，配置拉不到后被误报成 `Authentication required`。于是派单时显式注入 lite-wb 开关、并把代理变量逐个置空删除（`childEnv` 新增"值为 null = 从子环境里删掉这个变量"的语义）。默认档不带任何绕过 flag；它家目录只认 `~/.codebuddy`，指到 `~/.workbuddy/.../connector-keys/*.key` 会被凭证守卫拦下。
+- **成员模型清单多一个来源**：CodeBuddy 的 `custom-local:*` 列自它自己读的 `~/.workbuddy/models.json`（配置，不是凭据）。实测结论也写进了成员说明：那批模型要 `${NEWAPI_KEY}` 这类环境变量，WorkBuddy 界面外取不到——要么在系统环境里设好并把变量名写进设置的「额外透传变量」（只写名字），要么在 WorkBuddy 里登录一次改用它的自带模型；我不会去翻它存的密钥。
+- `esc()` 属性转义沿用；凭证守卫补上 `hosts.yml` / `.config/gh`（gh 的凭据也是别家凭据，原来漏在形状表之外）。
+- 断言从 82 项增至 **162 项**：`security-checks` 48 · `usage-checks` 52 · `gate-integration` 14 · `codebuddy-checks` 23（新）· `terminal-usage-checks` 25（新）。
+
+
 ## 0.5.1 (2026-11-07)
 
 用量账本 + 凭证守卫。这一版是给"哪家今天免费、还剩多少"这件事装上数据，顺带把调研定下的边界焊进代码。

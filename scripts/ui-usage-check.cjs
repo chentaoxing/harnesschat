@@ -19,6 +19,11 @@ app.whenReady().then(async () => {
       status: document.querySelector('#usage-status').textContent,
       badge: document.querySelector('#usage-badge').textContent,
       kindSelect: [...document.querySelectorAll('#task-kind option')].map(o => o.textContent).join('/'),
+      // 面板上必须看得见"结论是实测还是自称"
+      verdicts: [...document.querySelectorAll('.u-free')].map(el => el.textContent.trim()),
+      evidenceNotes: [...document.querySelectorAll('.u-ev')].map(el => el.innerText.trim()),
+      // 终端观测那一段必须存在，且明说"不是我派的"
+      terminalBlock: (document.querySelector('#terminal-block') || {}).innerText ? document.querySelector('#terminal-block').innerText.replace(/\\n+/g, ' | ').trim() : null,
       rows
     }, null, 1);
   })()`);
