@@ -20,4 +20,33 @@ function safeExec(file, argv, opts = {}) {
   return LAUNCH_PROC(file, argv, { ...opts, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
-module.exports = { safeExec };
+/**
+ * 停止要杀干净一整棵进程树，不能只杀直接子进程。
+ *
+ * 本机实测（2026-11-08，带正对照）：child.kill() 能带走普通孙子，但成员用
+ * detached:true 起的后台孙子会活下来并继续写盘——那就是"卡片显示停了、额度还在烧"。
+ * 无人值守的控制台不能靠这种平台 incidental 行为兜底。
+ *
+ * 安全属性不变：taskkill 是固定系统 exe，argv 逐元素传，pid 只来自 OS 给的数字，
+ * 不经过 shell，没有任何字符串拼接面。taskkill 不可用时回落到 child.kill()。
+ */
+function stopTree(child) {
+  if (!child || typeof child !== 'object') return false;
+  // 已经退出的别再杀一遍（也避免 close 事件还没到时的重复调用报错）
+  if (child.exitCode !== null || child.signalCode !== null) return false;
+  const pid = child.pid;
+  if (!Number.isInteger(pid) || pid <= 0) {
+    try { return child.kill(); } catch (e) { return false; }
+  }
+  if (process.platform === 'win32') {
+    try {
+      cp.execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
+        stdio: 'ignore', timeout: 8000, windowsHide: true, shell: false
+      });
+      return true;
+    } catch (e) { /* 进程已退或 taskkill 拒绝：下面回落 */ }
+  }
+  try { return child.kill(process.platform === 'win32' ? undefined : 'SIGTERM'); } catch (e) { return false; }
+}
+
+module.exports = { safeExec, stopTree };

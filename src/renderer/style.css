@@ -362,3 +362,32 @@ body { font-family: "Microsoft YaHei", "Segoe UI", sans-serif; font-size: 14px; 
 .ld-file:hover { background: #eaf1fb; border-color: #b9cbe8; }
 .ld-file:disabled { opacity: .6; cursor: default; }
 .ld-note { font-size: 11.5px; color: #6b7280; margin-top: 5px; line-height: 1.5; }
+
+/* 点桌面通知回到这张卡片：高亮一下，让他知道通知说的是哪一单 */
+.task-card.task-flash { animation: hc-flash 2.6s ease-out; }
+@keyframes hc-flash {
+  0%, 35% { box-shadow: 0 0 0 3px #f0b429; background: #fffbea; }
+  100% { box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+}
+
+/* 门状态徽章：能力轴（体检结论），与右侧 status-dot 的活动轴分开 */
+.door-badge {
+  font-size: 10.5px; padding: 1px 6px; border-radius: 9px; white-space: nowrap;
+  background: #eef1f6; color: #4b5563; border: 1px solid transparent;
+}
+.door-badge.green { background: #e6f6ec; color: #1c7c43; border-color: #bfe6cd; }
+.door-badge.red { background: #fdecec; color: #b42318; border-color: #f3c7c4; }
+.door-badge.chatter { background: #fff5e5; color: #9a6700; border-color: #f0dcb4; }
+.door-badge.stale { background: #f3f4f6; color: #6b7280; border-color: #dfe1e5; border-style: dashed; }
+.door-badge.pending { background: #eef2ff; color: #3730a3; border-color: #c7d2fe; }
+.door-badge.none { background: #f6f7f9; color: #9ca3af; border-color: #e5e7eb; }
+.m-door { margin-top: 2px; }
+.mi-name { font-weight: 600; }
+.mi-off { font-size: 11px; color: #9ca3af; margin-left: auto; }
+/* 提醒条挂在输入区上方：#composer 是 nowrap 的 flex 行，塞一个 100% 宽的子项会把输入框挤没 */
+#door-hint {
+  position: absolute; left: 16px; right: 16px; bottom: calc(100% + 6px); z-index: 6;
+  font-size: 11.5px; line-height: 1.5; color: #9a6700;
+  background: #fffaf0; border: 1px solid #f0e2c0; border-radius: 6px; padding: 5px 9px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.06);
+}

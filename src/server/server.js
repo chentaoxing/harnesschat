@@ -10,7 +10,7 @@ const path = require('path');
 const os = require('os');
 const { WebSocketServer } = require('ws');
 
-const { safeExec } = require('./safe-spawn');
+const { safeExec, stopTree } = require('./safe-spawn');
 const { MEMBERS, buildCustomSpawn, resolveCommand, resolveMemberProgram, listModels } = require('./adapters');
 const { Store } = require('./store');
 const { listSessions } = require('./sessions');
@@ -20,6 +20,7 @@ const health = require('./health');
 const delivery = require('./delivery');
 const landing = require('./landing');
 const { assertNoForeignCredentials } = require('./guard');
+const notifyCfg = require('../notify'); // 纯判据/文案，不碰 electron；开关默认值只此一处
 
 const ANSI_RE = /[\u001b\u009b][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[-a-zA-Z\d/#&.:=?%@~_]*)*)?\u0007)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-ntqry=><~]))/g;
 const stripAnsi = (s) => s.replace(ANSI_RE, '');
@@ -73,6 +74,9 @@ class GroupServer {
     this.staticDir = opts.staticDir;
     this.port = opts.port || 18790;
     this.token = opts.token || '';
+    // 主进程挂在这里收"一单跑完了"，据此弹桌面通知。服务器不 require('electron')，
+    // 所以断言脚本能起真服务器验这条链，而不必假造一个 Electron。
+    this.onTaskFinished = typeof opts.onTaskFinished === 'function' ? opts.onTaskFinished : null;
     this.store = new Store(this.dataDir);
 
     const defaultWorkspace = path.join(os.homedir(), 'HarnessChat工作区');
@@ -245,6 +249,7 @@ class GroupServer {
           };
         }),
         membersCustom: this.config.membersCustom || [],
+        notify: { onFinish: notifyCfg.enabled(this.config) },
         messages: this.messages
       });
     }
@@ -279,6 +284,10 @@ class GroupServer {
           if (Array.isArray(s.membersCustom)) {
             this.config.membersCustom = s.membersCustom.filter(cm => cm && cm.name && cm.program);
           }
+          // 完成通知：默认开（这正是"跑完看得见"那一段），要关在这里关
+          if (s.notify && typeof s.notify === 'object') {
+            this.config.notify = { onFinish: s.notify.onFinish !== false };
+          }
           // 自动体检：默认关；开了才排定时器，改完立刻重排
           if (s.health && typeof s.health === 'object') {
             this.config.health = { auto: s.health.auto === true, everyHours: Number(s.health.everyHours) || 24 };
@@ -307,9 +316,7 @@ class GroupServer {
       req.on('end', () => {
         try {
           const { taskId } = JSON.parse(body);
-          const child = this.running.get(taskId);
-          if (child) { try { child.kill(); } catch (e) {} }
-          return json(200, { ok: !!child });
+          return json(200, { ok: this.stopTask(String(taskId || '')) });
         } catch (e) { return json(400, { error: String(e.message || e) }); }
       });
       return;
@@ -453,7 +460,7 @@ class GroupServer {
 
     const timeoutMs = (member.timeoutMin || 15) * 60 * 1000;
     const timer = setTimeout(() => {
-      try { child.kill(); } catch (e) {}
+      stopTree(child);
       this.finishTask(task, 'timeout', child);
     }, timeoutMs);
 
@@ -537,12 +544,29 @@ class GroupServer {
     if (this.healthTimer.unref) this.healthTimer.unref();
   }
 
+  /**
+   * 手动停止的统一出口。杀整棵树（见 safe-spawn.stopTree 的实测理由），
+   * 并在卡片上留一句"是你停的"——否则 close 事件带着非零退出码回来，
+   * 卡片会含糊地记成"失败"，他过两天回看分不清是成员坏了还是自己按的。
+   */
+  stopTask(taskId) {
+    const child = this.running.get(taskId);
+    if (!child) return false;
+    const task = this.messages.find(m => m && m.type === 'task' && m.id === taskId);
+    if (task) task._stopped = true;
+    stopTree(child);
+    return true;
+  }
+
   finishTask(task, status, child, code) {
     if (!this.running.has(task.id)) return;
     this.running.delete(task.id);
     if (code !== undefined && code !== 0 && code !== null) {
       task.text += `\n[进程退出码 ${code}]`;
     }
+    if (task._stopped) task.text += '\n[手动停止：你在卡片上点了停止，进程树已杀干净]';
+    const stopped = !!task._stopped;
+    delete task._stopped; // 私有标记不进转录，也不进广播
     // 退出码 0 不代表成功：有的成员把上游报错直接打在 stdout 上退 0（实测 CodeBuddy 就是这样）。
     // 卡片和账本都用同一个判据，免得"界面显示成功、账本显示成功"一起错。
     const finalStatus = status === 'timeout' ? 'timeout' : usage.deriveStatus(status === 'done', task.text);
@@ -590,6 +614,17 @@ class GroupServer {
     if (!task.quiet) {
       this.store.appendMessage({ type: 'task_status', taskId: task.id, status: finalStatus, code: code ?? null, at: Date.now() });
       this.broadcast({ event: 'message', msg: { ...task } });
+      // 桌面通知：他可能已经把窗口关到托盘了。事件里不带输出全文——
+      // 通知不是转录倾倒场，文案由 src/notify.js 从交付结论现造，与卡片同源。
+      if (this.onTaskFinished) {
+        try {
+          this.onTaskFinished({
+            id: task.id, memberId: task.memberId, memberName: task.memberName,
+            status: finalStatus, prompt: task.prompt, taskKind: task.taskKind,
+            delivery: task.delivery || null, stopped, quiet: false
+          });
+        } catch (e) { /* 通知坏了不许拖垮账本与转录 */ }
+      }
     }
   }
 }

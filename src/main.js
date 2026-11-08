@@ -1,14 +1,27 @@
 // Electron 主进程：内嵌 HarnessChat 服务器 + 窗口 + 托盘常驻 + 自研更新器
-const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { GroupServer } = require('./server/server');
 const updater = require('./updater');
+const { createNotifications } = require('./notify-electron');
 
 let win = null;
 let tray = null;
+let server = null;
 const PORT = 18790;
+const TRAY_TIP_DEFAULT = 'HarnessChat — harness 群聊';
+
+// 通知接线与产品共用一份（界面验收脚本注册的就是它）。
+// getServer 用闭包懒读：server 要等 whenReady 才建出来。
+const notifications = createNotifications({
+  getWindow: () => win,
+  getTray: () => tray,
+  getServer: () => server,
+  Notification,
+  defaultTip: TRAY_TIP_DEFAULT
+});
 
 ipcMain.handle('app:version', () => app.getVersion());
 
@@ -46,7 +59,7 @@ if (!gotLock) {
     const dataDir = app.getPath('userData');
     const staticDir = path.join(__dirname, 'renderer');
     const token = loadOrCreateToken(dataDir);
-    const server = new GroupServer({ dataDir, staticDir, port: PORT, token });
+    server = new GroupServer({ dataDir, staticDir, port: PORT, token, onTaskFinished: notifications.announce });
     await server.listen();
     console.log(`[harnesschat] server ready at http://127.0.0.1:${PORT}  data: ${dataDir}`);
 
@@ -77,13 +90,18 @@ if (!gotLock) {
     const trayPath = path.join(__dirname, '..', 'assets', 'tray.png');
     const img = fs.existsSync(trayPath) ? nativeImage.createFromPath(trayPath) : nativeImage.createEmpty();
     tray = new Tray(img);
-    tray.setToolTip('HarnessChat — harness 群聊');
+    tray.setToolTip(TRAY_TIP_DEFAULT);
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: '打开群聊', click: () => { win.show(); win.focus(); } },
       { type: 'separator' },
       { label: '退出', click: () => { app.isQuiting = true; app.quit(); } }
     ]));
     tray.on('double-click', () => { win.show(); win.focus(); });
+    // 他回到窗口了：停掉任务栏闪烁，托盘提示也复位（那条结论他已经看见了）
+    win.on('focus', () => {
+      win.flashFrame(false);
+      if (tray && !tray.isDestroyed()) tray.setToolTip(TRAY_TIP_DEFAULT);
+    });
 
     app.on('activate', () => { if (win) win.show(); });
   });

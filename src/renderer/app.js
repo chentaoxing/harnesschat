@@ -31,6 +31,7 @@ function renderMemberList() {
   box.innerHTML = '';
   for (const m of state.members) {
     const working = isWorking(m.id);
+    const door = DoorLabel.label(doorRow(m.id), Date.now());
     const div = document.createElement('div');
     div.className = 'member' + (m.enabled ? '' : ' disabled');
     div.title = m.note || '';
@@ -39,6 +40,7 @@ function renderMemberList() {
       <div class="m-info">
         <div class="m-name">${esc(m.name)}${m.custom ? ' <span class="tag">自定义</span>' : ''}</div>
         <div class="m-note">${m.enabled ? esc(m.modelSupport && m.defaultModel ? m.defaultModel : (m.detected ? '' : '未检测到')) : (m.detected ? '未启用' : '未检测到')}</div>
+        <div class="m-door">${badgeHTML(door)}</div>
       </div>
       <div class="status-dot ${m.enabled ? (working ? 'working' : 'idle') : 'off'}" title="${working ? '干活中' : (m.enabled ? '空闲' : '不可用')}"></div>
     `;
@@ -155,6 +157,17 @@ function scrollToBottom() {
   box.scrollTop = box.scrollHeight;
 }
 
+// 点了桌面通知回到这一单：滚到卡片并高亮 2.6 秒，让他一眼知道通知说的是哪张
+function focusTaskCard(taskId) {
+  if (!taskId) return false;
+  const el = document.querySelector(`[data-task-id="${CSS.escape(taskId)}"]`);
+  if (!el) return false;
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  el.classList.add('task-flash');
+  setTimeout(() => el.classList.remove('task-flash'), 2600);
+  return true;
+}
+
 function rerenderAll() {
   const box = $('#messages');
   box.innerHTML = '';
@@ -261,13 +274,22 @@ async function send() {
 }
 
 // ---------- @ 浮层 ----------
+// 门体检结论按 memberId 取；没体检过就是 null，标签会老实说"未体检"
+function doorRow(memberId) {
+  return healthRows.find(r => r.memberId === memberId) || null;
+}
+function badgeHTML(L) {
+  return `<span class="door-badge ${L.cls}" title="${esc(L.detail)}">${esc(L.short)}</span>`;
+}
+
 function showMention() {
   const pop = $('#mention-pop');
   pop.innerHTML = '';
   for (const m of state.members) {
     const div = document.createElement('div');
     div.className = 'mention-item' + (m.enabled ? '' : ' disabled');
-    div.innerHTML = `<div class="avatar" style="background:${m.color}">${esc(m.name[0])}</div>${esc(m.name)}${m.enabled ? '' : '（不可用）'}`;
+    const badge = badgeHTML(DoorLabel.label(doorRow(m.id), Date.now()));
+    div.innerHTML = `<div class="avatar" style="background:${m.color}">${esc(m.name[0])}</div><span class="mi-name">${esc(m.name)}</span>${badge}${m.enabled ? '' : '<span class="mi-off">未启用/未检测到</span>'}`;
     div.addEventListener('click', () => {
       const input = $('#input');
       input.value = input.value.replace(/@$/, `@${m.name} `);
@@ -315,6 +337,13 @@ async function checkMention() {
     }
   }
   $('#model-input').placeholder = m && m.modelSupport ? `模型（默认：${m.defaultModel || '成员默认'}）` : '模型（该成员不支持指定）';
+  // 派单前把门体检的结论摆出来：只提醒，不拦他（派给谁是他的控制权）
+  const hintBox = $('#door-hint');
+  if (hintBox) {
+    const h = m ? DoorLabel.hint(doorRow(m.id), Date.now()) : null;
+    if (h) { hintBox.textContent = h; hintBox.classList.remove('hidden'); }
+    else { hintBox.textContent = ''; hintBox.classList.add('hidden'); }
+  }
 }
 
 function updateComposerPlaceholder() {
@@ -612,6 +641,8 @@ $('#sessions-mask').addEventListener('click', (e) => { if (e.target.id === 'sess
 // ---------- 设置 ----------
 function openSettings() {
   $('#set-workspace').value = state.workspace;
+  const nf = $('#set-notify');
+  if (nf) nf.checked = state.notifyOnFinish !== false;
   const box = $('#set-members');
   box.innerHTML = '';
   for (const m of state.members) {
@@ -722,9 +753,11 @@ async function saveSettings() {
     });
   }
   const workspace = $('#set-workspace').value.trim();
+  const nf = $('#set-notify');
+  const notify = { onFinish: nf ? !!nf.checked : true };
   await fetch(BASE + '/api/settings', {
     method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ workspace, members, membersCustom })
+    body: JSON.stringify({ workspace, members, membersCustom, notify })
   });
   $('#settings-mask').classList.add('hidden');
   await loadState();
@@ -807,6 +840,7 @@ async function loadState() {
   state.membersCustom = j.membersCustom || [];
   state.messages = j.messages;
   state.workspace = j.workspace;
+  state.notifyOnFinish = !j.notify || j.notify.onFinish !== false;
   state.programPaths = {};
   for (const m of j.members) if (m.programPath) state.programPaths[m.id] = m.programPath;
   $('#workspace-label').textContent = '工作区: ' + j.workspace;
@@ -892,6 +926,10 @@ async function downloadAndRunUpdate(btn) {
 if (HAS_BRIDGE && window.harnesschat.onUpdateProgress) {
   window.harnesschat.onUpdateProgress((text) => setUpdateStatus('下载中 ' + text));
 }
+// 点桌面通知 → 主进程把窗口拉起来并告诉我们看哪一张卡片
+if (HAS_BRIDGE && window.harnesschat.onTaskFocus) {
+  window.harnesschat.onTaskFocus((taskId) => focusTaskCard(taskId));
+}
 
 async function checkUpdateInteractive() {
   if (!HAS_BRIDGE) { setUpdateStatus('（浏览器模式无更新器，请用 npm start 或安装包运行）'); return; }
@@ -939,4 +977,7 @@ loadState().then(() => {
   autoCheckUpdate();
   setInterval(autoCheckUpdate, 30 * 60 * 1000); // 开久了也能主动发现新版本
   setTimeout(() => loadSessions(true), 1200);   // 静默扫一次外部会话，死了的在侧栏亮个数字
+  // 门体检结论启动就读：@ 浮层和成员列表要在他派单前就说得出这扇门能不能干活，
+  // 不能等他先点开体检面板才有数据。读的是盘上已有的记录，不触发新探针、不花额度。
+  loadHealth().then(() => { renderMemberList(); checkMention(); }).catch(() => {});
 });

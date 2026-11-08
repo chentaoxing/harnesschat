@@ -45,6 +45,7 @@
       </select>
       <input id="model-input" type="text" list="model-list" placeholder="模型（留空=成员默认）">
       <datalist id="model-list"></datalist>
+      <div id="door-hint" class="hidden"></div>
       <textarea id="input" rows="2" placeholder="输入消息，@成员 派任务（如：@Codex 把 README 翻成英文）"></textarea>
       <button id="btn-send">发送</button>
     </div>
@@ -126,6 +127,11 @@
       <label>群工作区（headless 成员的运行目录，即安全边界）/ Group workspace (working dir & security boundary)</label>
       <input id="set-workspace" type="text">
     </div>
+    <div class="set-row">
+      <label>跑完通知 / Finish notification</label>
+      <label class="chip"><input type="checkbox" id="set-notify"> 一单跑完弹桌面通知（窗口关到托盘时也能看见）</label>
+      <div class="sm-hint">你正看着窗口时不打扰；体检探针永不弹。通知文案与卡片同源——它只说了没动手，通知就不会写成"完成"。点通知直接回到那张卡片。</div>
+    </div>
     <div class="set-members" id="set-members"></div>
     <div class="custom-block">
       <h4>自定义成员 / Custom members</h4>
@@ -140,6 +146,7 @@
   </div>
 </div>
 
+<script src="door-label.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
